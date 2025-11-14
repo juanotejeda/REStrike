@@ -121,6 +121,7 @@ Pasos:
 
 ## 🏗️ Estructura del Proyecto
 
+```
 REStrike/
 ├── cmd/
 │   └── restrike/
@@ -148,12 +149,14 @@ REStrike/
 ├── LICENSE
 ├── .gitignore
 └── README.md
+```
 ---
 
 ## ⚙️ Configuración
 
 Crear archivo config.yaml en la raíz del proyecto:
 
+```yaml
 database:
   path: ~/.restrike/restrike.db
   memory: false
@@ -205,6 +208,7 @@ reports:
   auto_open: false
   include_recommendations: true
   include_raw_data: false
+```
 
 ---
 

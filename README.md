@@ -51,4 +51,4 @@ go mod tidy
 - [ ] Seguridad y manejo de usuarios
 
 ## Créditos y comunidad
-Remote Execution (#RE) | https://remoteexecution.cc
+Remote Execution (#RE) | https://remoteexecution.org

@@ -1,0 +1,42 @@
+# Binarios
+restrike
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Directorios de compilación
+bin/
+dist/
+
+# Archivos de dependencias
+go.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Datos locales
+.restrike/
+*.db
+*.db-wal
+*.db-shm
+
+# Reportes generados
+reports/
+*.pdf
+*.html
+
+# Logs
+*.log
+
+# Archivos temporales
+tmp/
+temp/

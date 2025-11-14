@@ -4,94 +4,89 @@ import (
 	"context"
 	"fmt"
 	"time"
+
 	"github.com/Ullaakut/nmap/v3"
+	"github.com/juanotejeda/REStrike/pkg/models"
 )
 
-type ScanOptions struct {
-	Ports      []string
-	NSEScripts []string
-	Aggressive bool
+// Scanner gestor de escaneos Nmap
+type Scanner struct {
+	logger Logger
 }
 
-type Host struct {
-	IP       string
-	Hostname string
-	Status   string
-	Ports    []Port
-	Services []Service
-	OS       string
+// Logger interface
+type Logger interface {
+	Infof(format string, args ...interface{})
+	Errorf(format string, args ...interface{})
+	Debugf(format string, args ...interface{})
 }
 
-type Port struct {
-	ID       int
-	Protocol string
-	State    string
-	Service  string
-	Version  string
+// NewScanner crea nuevo scanner
+func NewScanner(logger Logger) *Scanner {
+	return &Scanner{logger: logger}
 }
 
-type Service struct {
-	Name    string
-	Version string
-	CPE     []string
-}
+// ScanNetwork ejecuta escaneo de red
+func (s *Scanner) ScanNetwork(ctx context.Context, target string) (*models.ScanResult, error) {
+	s.logger.Infof("Iniciando escaneo de: %s", target)
 
-type ScanResult struct {
-	Hosts      []Host
-	StartTime  time.Time
-	EndTime    time.Time
-	TotalHosts int
-}
+	result := &models.ScanResult{
+		Target:    target,
+		StartTime: time.Now(),
+		Hosts:     []models.Host{},
+	}
 
-// NetworkScanner gestiona escaneos de red
-func ScanNetwork(ctx context.Context, target string, options ScanOptions) (*ScanResult, error) {
 	// Configurar scanner Nmap
 	scanner, err := nmap.NewScanner(
 		ctx,
 		nmap.WithTargets(target),
-		nmap.WithPorts(options.Ports...),
+		nmap.WithPorts("1-1000"),
 		nmap.WithServiceInfo(),
 		nmap.WithOSDetection(),
-		nmap.WithTimingTemplate(nmap.TimingAggressive),
-		nmap.WithScripts(options.NSEScripts...),
+		nmap.WithTimingTemplate(nmap.TimingPolite),
 	)
 
 	if err != nil {
+		s.logger.Errorf("Error creando scanner: %v", err)
 		return nil, fmt.Errorf("error creando scanner: %w", err)
 	}
-	startTime := time.Now()
-	result, warnings, err := scanner.Run()
+
+	// Ejecutar escaneo
+	res, warnings, err := scanner.Run()
 	if err != nil {
+		s.logger.Errorf("Error en escaneo: %v", err)
 		return nil, fmt.Errorf("error en escaneo: %w", err)
 	}
+
 	if warnings != nil {
-		fmt.Printf("Advertencias: %v\n", warnings)
+		s.logger.Infof("Advertencias: %v", warnings)
 	}
-	// Parsear resultados
-	scanResult := &ScanResult{
-		StartTime:  startTime,
-		EndTime:    time.Now(),
-		TotalHosts: len(result.Hosts),
-		Hosts:      []Host{},
-	}
-	for _, host := range result.Hosts {
+
+	// Procesar resultados
+	for _, host := range res.Hosts {
 		if len(host.Addresses) == 0 {
 			continue
 		}
-		h := Host{
-			IP:      host.Addresses[0].Addr,
-			Status:  string(host.Status.State),
-			Ports:   []Port{},
-			Services: []Service{},
+
+		h := models.Host{
+			IP:     host.Addresses[0].Addr,
+			Status: string(host.Status.State),
+			Ports:  []models.Port{},
 		}
+
+		// Hostname
 		if len(host.Hostnames) > 0 {
 			h.Hostname = host.Hostnames[0].Name
 		}
+
+		// SO
 		if len(host.OS.Matches) > 0 {
 			h.OS = host.OS.Matches[0].Name
 		}
+
+		// Puertos
 		for _, port := range host.Ports {
-			p := Port{
+			p := models.Port{
 				ID:       int(port.ID),
 				Protocol: port.Protocol,
 				State:    string(port.State.State),
@@ -99,27 +94,15 @@ func ScanNetwork(ctx context.Context, target string, options ScanOptions) (*Scan
 				Version:  port.Service.Version,
 			}
 			h.Ports = append(h.Ports, p)
-			if port.Service.Name != "" {
-				svc := Service{
-					Name:    port.Service.Name,
-					Version: port.Service.Version,
-				}
-				for _, cpe := range port.Service.CPEs {
-					svc.CPE = append(svc.CPE, string(cpe))
-				}
-				h.Services = append(h.Services, svc)
-			}
 		}
-		scanResult.Hosts = append(scanResult.Hosts, h)
-	}
-	return scanResult, nil
-}
 
-// DefaultScanOptions retorna opciones predeterminadas
-func DefaultScanOptions() ScanOptions {
-	return ScanOptions{
-		Ports: []string{"21", "22", "23", "25", "80", "443", "3306", "3389", "8080"},
-		NSEScripts: []string{"vuln", "exploit", "http-enum", "http-vuln-*", "ssl-*", "smb-vuln-*"},
-		Aggressive: false,
+		result.Hosts = append(result.Hosts, h)
 	}
+
+	result.EndTime = time.Now()
+	result.TotalHosts = len(result.Hosts)
+	result.StatusCode = 2 // completed
+
+	s.logger.Infof("Escaneo completado: %d hosts encontrados", result.TotalHosts)
+	return result, nil
 }

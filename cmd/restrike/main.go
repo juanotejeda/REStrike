@@ -271,7 +271,7 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 			result.EndTime.Format("15:04:05"),
 		)
 
-		if len(result.Hosts) > 0 {
+				if len(result.Hosts) > 0 {
 			report += "HOSTS DESCUBIERTOS:\n\n"
 			for i, host := range result.Hosts {
 				report += fmt.Sprintf("%d. %s\n", i+1, host.IP)
@@ -290,16 +290,27 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 						if port.Version != "" {
 							service = fmt.Sprintf("%s (%s)", port.Service, port.Version)
 						}
-						report += fmt.Sprintf("     - %d/%s: %s [%s]\n",
+						report += fmt.Sprintf("     - %d/%s: %s [%s]",
 							port.ID,
 							port.Protocol,
 							port.State,
 							service,
 						)
+
+						// Verificar vulnerabilidades
+						vulns := scanner.GetVulnerabilitiesForPort(port.ID, port.Protocol, port.Service)
+						if len(vulns) > 0 {
+							for _, vuln := range vulns {
+								report += fmt.Sprintf("\n       ⚠️  %s\n       %s\n", scanner.RiskLevel(vuln.Risk), vuln.Description)
+							}
+						}
+						report += "\n"
 					}
 				}
 				report += "\n"
 			}
+
+
 		} else {
 			report += "No se encontraron hosts activos.\n"
 		}

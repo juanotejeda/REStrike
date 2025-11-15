@@ -97,9 +97,14 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 	subtitle := widget.NewLabel("Herramienta de Pentesting Visual para #RE Community")
 	subtitle.Alignment = fyne.TextAlignCenter
 
-	startBtn := widget.NewButton("Nuevo Escaneo", func() {
+		startBtn := widget.NewButton("Nuevo Escaneo", func() {
 		logger.Info("Abriendo formulario de escaneo...")
 		showScanForm(myWindow, logger, scan, db)
+	})
+
+	historyBtn := widget.NewButton("Ver Historial", func() {
+		logger.Info("Abriendo historial...")
+		showScanHistory(myWindow, logger, scan, db)
 	})
 
 	exitBtn := widget.NewButton("Salir", func() {
@@ -107,7 +112,8 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		os.Exit(0)
 	})
 
-	buttons := container.NewHBox(startBtn, exitBtn)
+	buttons := container.NewHBox(startBtn, historyBtn, exitBtn)
+
 
 	content := container.NewVBox(
 		title,
@@ -244,7 +250,7 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		// Guardar en BD
 		scanID := fmt.Sprintf("%d", time.Now().UnixNano())
 		jsonData, _ := json.Marshal(result)
-		err2 := db.SaveScan(scanID, target, jsonData)
+		err2 := db.SaveScanComplete(scanID, target, result.StartTime, result.EndTime, result.TotalHosts, result.StatusCode, jsonData)
 		if err2 != nil {
 			logger.Warnf("Error guardando en BD: %v", err2)
 		} else {
@@ -305,6 +311,80 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		logger.Infof("Escaneo completado: %d hosts en %v", result.TotalHosts, duration)
 	}()
 }
+
+func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
+	scans, err := db.GetScanHistory(50)
+	if err != nil {
+		logger.Errorf("Error obteniendo historial: %v", err)
+		return
+	}
+
+	backBtn := widget.NewButton("Volver", func() {
+		logger.Info("Volviendo al menú principal...")
+		showMainScreen(myWindow, logger, scan, db)
+	})
+
+	if len(scans) == 0 {
+		content := container.NewVBox(
+			widget.NewLabel("No hay escaneos guardados"),
+			widget.NewSeparator(),
+			backBtn,
+		)
+		myWindow.SetContent(content)
+		return
+	}
+
+	items := container.NewVBox()
+	for _, s := range scans {
+		scanItem := widget.NewButton(fmt.Sprintf("%s - %s (%d hosts)", s.Target, s.Timestamp, s.TotalHosts), func(scanID string) func() {
+			return func() {
+				logger.Infof("Viendo escaneo: %s", scanID)
+				showScanDetail(myWindow, logger, scan, db, scanID)
+			}
+		}(s.ID))
+		items.Add(scanItem)
+	}
+
+	scroll := container.NewScroll(items)
+	content := container.NewVBox(
+		widget.NewLabel("Historial de Escaneos"),
+		widget.NewSeparator(),
+		scroll,
+		widget.NewSeparator(),
+		backBtn,
+	)
+
+	myWindow.SetContent(content)
+}
+
+func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scanID string) {
+	data, err := db.GetScanData(scanID)
+	if err != nil {
+		logger.Errorf("Error obteniendo escaneo: %v", err)
+		return
+	}
+
+	backBtn := widget.NewButton("Volver", func() {
+		logger.Info("Volviendo al historial...")
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	resultsText := widget.NewLabel(data)
+	resultsText.Alignment = fyne.TextAlignLeading
+	resultsText.Wrapping = fyne.TextWrapWord
+
+	scroll := container.NewScroll(resultsText)
+	content := container.NewVBox(
+		widget.NewLabel("Detalles del Escaneo"),
+		widget.NewSeparator(),
+		scroll,
+		widget.NewSeparator(),
+		backBtn,
+	)
+
+	myWindow.SetContent(content)
+}
+
 
 func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string) {
 	logger.Infof("Ejecutando escaneo headless contra: %s", target)

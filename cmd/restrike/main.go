@@ -74,13 +74,15 @@ func setupLogger(verbose bool) *logrus.Logger {
 
 func startGUI(logger *logrus.Logger, db *storage.Database) {
 	myApp := app.New()
-	myWindow := myApp.NewWindow()
-	myWindow.SetTitle("REStrike - Pentesting Tool")
+	myWindow := myApp.NewWindow("REStrike - Pentesting Tool")
 	myWindow.Resize(fyne.NewSize(1200, 800))
 
 	// Welcome screen
-	title := widget.NewLabelWithAlignment("REStrike v0.1.0", fyne.TextAlignCenter)
-	subtitle := widget.NewLabelWithAlignment("Herramienta de Pentesting Visual para #RE Community", fyne.TextAlignCenter)
+	title := widget.NewLabel("REStrike v0.1.0")
+	title.Alignment = fyne.TextAlignCenter
+	
+	subtitle := widget.NewLabel("Herramienta de Pentesting Visual para #RE Community")
+	subtitle.Alignment = fyne.TextAlignCenter
 
 	startBtn := widget.NewButton("Nuevo Escaneo", func() {
 		logger.Info("Iniciando nuevo escaneo...")

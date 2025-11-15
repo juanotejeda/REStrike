@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/Ullaakut/nmap/v3"
@@ -35,6 +36,12 @@ func (s *Scanner) CheckNmapAvailability() bool {
 	return err == nil
 }
 
+// isLocalhost verifica si el target es localhost
+func isLocalhost(target string) bool {
+	return target == "127.0.0.1" || target == "localhost" || 
+		strings.HasPrefix(target, "127.") || target == "::1"
+}
+
 // ScanNetwork ejecuta escaneo de red
 func (s *Scanner) ScanNetwork(ctx context.Context, target string) (*models.ScanResult, error) {
 	s.logger.Infof("Iniciando escaneo de: %s", target)
@@ -51,21 +58,32 @@ func (s *Scanner) ScanNetwork(ctx context.Context, target string) (*models.ScanR
 		Hosts:     []models.Host{},
 	}
 
-	// Configurar scanner Nmap - sin OS detection para evitar requerir sudo
-	// El usuario puede ejecutar con sudo si necesita features avanzadas
+	// Configurar scanner Nmap
 	opts := []nmap.Option{
 		nmap.WithTargets(target),
 		nmap.WithPorts("1-1000"),
 		nmap.WithServiceInfo(),
-		nmap.WithTimingTemplate(nmap.TimingPolite),
 	}
 
-	// Si estamos ejecutando como root, habilitar OS detection
-	if os.Geteuid() == 0 {
-		s.logger.Infof("Ejecutando como root - habilitando detección de SO")
-		opts = append(opts, nmap.WithOSDetection())
+	// Ajustar timing según el target
+	if isLocalhost(target) {
+		s.logger.Infof("Target local detectado - usando timing Insane para velocidad máxima")
+		opts = append(opts, nmap.WithTimingTemplate(nmap.TimingAggressive))
 	} else {
-		s.logger.Warnf("No ejecutando como root - omitiendo detección de SO (usa 'sudo' para habilitarlo)")
+		s.logger.Infof("Target remoto - usando timing Aggressive")
+		opts = append(opts, nmap.WithTimingTemplate(nmap.TimingAggressive))
+	}
+
+	// OS detection solo para targets remotos como root
+	if os.Geteuid() == 0 {
+		if !isLocalhost(target) {
+			s.logger.Infof("Ejecutando como root en target remoto - habilitando detección de SO")
+			opts = append(opts, nmap.WithOSDetection())
+		} else {
+			s.logger.Warnf("Localhost detectado - omitiendo detección de SO para velocidad")
+		}
+	} else {
+		s.logger.Warnf("No ejecutando como root - omitiendo detección de SO")
 	}
 
 	scanner, err := nmap.NewScanner(ctx, opts...)

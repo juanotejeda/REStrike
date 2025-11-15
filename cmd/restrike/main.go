@@ -45,8 +45,7 @@ func main() {
 
 	// Si es headless, ejecutar escaneo directo
 	if *headless && *target != "" {
-		fmt.Printf("Modo headless: escaneo de %s\n", *target)
-		logger.Infof("Escaneo headless contra: %s", *target)
+		logger.Infof("Modo headless: escaneo de %s", *target)
 		return
 	}
 
@@ -80,23 +79,29 @@ func startGUI(logger *logrus.Logger, db *storage.Database) {
 	// Welcome screen
 	title := widget.NewLabel("REStrike v0.1.0")
 	title.Alignment = fyne.TextAlignCenter
-	
+
 	subtitle := widget.NewLabel("Herramienta de Pentesting Visual para #RE Community")
 	subtitle.Alignment = fyne.TextAlignCenter
 
+	// Botón para nuevo escaneo
 	startBtn := widget.NewButton("Nuevo Escaneo", func() {
-		logger.Info("Iniciando nuevo escaneo...")
-		fmt.Println("Botón de escaneo presionado")
+		logger.Info("Botón de escaneo presionado")
+		fmt.Println("Funcionalidad de escaneo por implementar")
 	})
 
-	helpLabel := widget.NewLabel("Selecciona una opción para comenzar")
+	// Botón para salir
+	exitBtn := widget.NewButton("Salir", func() {
+		logger.Info("Aplicación cerrada")
+		myApp.Quit()
+	})
+
+	buttons := container.NewHBox(startBtn, exitBtn)
 
 	content := container.NewVBox(
 		title,
 		subtitle,
 		widget.NewSeparator(),
-		helpLabel,
-		startBtn,
+		buttons,
 	)
 
 	myWindow.SetContent(content)

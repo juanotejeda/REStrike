@@ -70,3 +70,14 @@ type ExploitResult struct {
 	SessionID string    `json:"session_id"`
 	Output    string    `json:"output"`
 }
+
+// ScanOptions opciones para ejecutar un escaneo
+type ScanOptions struct {
+	Target         string   `json:"target"`
+	Ports          string   `json:"ports"`
+	Aggressive     bool     `json:"aggressive"`
+	OSDetection    bool     `json:"os_detection"`
+	ServiceVersion bool     `json:"service_version"`
+	NSEScripts     []string `json:"nse_scripts,omitempty"`
+	Timeout        int      `json:"timeout"`
+}

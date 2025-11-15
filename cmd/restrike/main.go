@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -31,9 +32,17 @@ func main() {
 	logger := setupLogger(*verbose)
 	logger.Infof("REStrike v%s (%s) iniciando...", version, commit)
 
-	homeDir, _ := os.UserHomeDir()
+		// Obtener directorio home - si estamos en sudo, usar /root
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir, _ = os.UserHomeDir()
+	}
 	dataDir := filepath.Join(homeDir, ".restrike")
-	os.MkdirAll(dataDir, 0700)
+	err := os.MkdirAll(dataDir, 0700)
+	if err != nil {
+		logger.Warnf("Error creando directorio: %v", err)
+	}
+
 
 	dbPath := filepath.Join(dataDir, "restrike.db")
 	db, err := storage.NewDatabase(dbPath, logger)
@@ -44,7 +53,7 @@ func main() {
 
 	if *headless && *target != "" {
 		logger.Infof("Modo headless: escaneo de %s", *target)
-		runHeadlessScan(logger, *target)
+		runHeadlessScan(logger, db, *target)
 		return
 	}
 
@@ -76,12 +85,12 @@ func startGUI(logger *logrus.Logger, db *storage.Database) {
 
 	scan := scanner.NewScanner(logger)
 
-	showMainScreen(myWindow, logger, scan)
+	showMainScreen(myWindow, logger, scan, db)
 
 	myWindow.ShowAndRun()
 }
 
-func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner) {
+func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	title := widget.NewLabel("REStrike v0.1.0")
 	title.Alignment = fyne.TextAlignCenter
 
@@ -90,7 +99,7 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 
 	startBtn := widget.NewButton("Nuevo Escaneo", func() {
 		logger.Info("Abriendo formulario de escaneo...")
-		showScanForm(myWindow, logger, scan)
+		showScanForm(myWindow, logger, scan, db)
 	})
 
 	exitBtn := widget.NewButton("Salir", func() {
@@ -110,7 +119,7 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 	myWindow.SetContent(content)
 }
 
-func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner) {
+func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	targetEntry := widget.NewEntry()
 	targetEntry.SetPlaceHolder("ej: 192.168.1.0/24, 127.0.0.1, o 192.168.1.1-10")
 
@@ -124,18 +133,18 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 		}
 
 		logger.Infof("Iniciando escaneo de: %s", target)
-		showScanResults(myWindow, logger, scan, target)
+		showScanResults(myWindow, logger, scan, db, target)
 	})
 
 	backBtn := widget.NewButton("Volver", func() {
 		logger.Info("Volviendo al menú principal...")
-		showMainScreen(myWindow, logger, scan)
+		showMainScreen(myWindow, logger, scan, db)
 	})
 
 	targetEntry.OnSubmitted = func(s string) {
 		if s != "" {
 			logger.Infof("Iniciando escaneo de: %s", s)
-			showScanResults(myWindow, logger, scan, s)
+			showScanResults(myWindow, logger, scan, db, s)
 		}
 	}
 
@@ -160,7 +169,7 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 	myWindow.SetContent(scroll)
 }
 
-func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, target string) {
+func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, target string) {
 	statusLabel := widget.NewLabel(fmt.Sprintf("Escaneando: %s", target))
 	statusLabel.Alignment = fyne.TextAlignCenter
 
@@ -172,11 +181,10 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 
 	backBtn := widget.NewButton("Volver", func() {
 		logger.Info("Volviendo al menú principal...")
-		showMainScreen(myWindow, logger, scan)
+		showMainScreen(myWindow, logger, scan, db)
 	})
 	backBtn.Disable()
 
-	// Declarar cancelBtn como pointer para poder usarlo en su propio callback
 	var cancelBtn *widget.Button
 	cancelBtn = widget.NewButton("Cancelar Escaneo", func() {
 		logger.Warn("Cancelando escaneo...")
@@ -233,6 +241,16 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 
 		duration := time.Since(startTime)
 
+		// Guardar en BD
+		scanID := fmt.Sprintf("%d", time.Now().UnixNano())
+		jsonData, _ := json.Marshal(result)
+		err2 := db.SaveScan(scanID, target, jsonData)
+		if err2 != nil {
+			logger.Warnf("Error guardando en BD: %v", err2)
+		} else {
+			logger.Infof("Escaneo guardado en BD con ID: %s", scanID)
+		}
+
 		report := fmt.Sprintf("ESCANEO COMPLETADO\n\n"+
 			"Target: %s\n"+
 			"Hosts encontrados: %d\n"+
@@ -288,7 +306,7 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	}()
 }
 
-func runHeadlessScan(logger *logrus.Logger, target string) {
+func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string) {
 	logger.Infof("Ejecutando escaneo headless contra: %s", target)
 	scan := scanner.NewScanner(logger)
 	ctx := context.Background()
@@ -297,5 +315,10 @@ func runHeadlessScan(logger *logrus.Logger, target string) {
 		logger.Errorf("Error en escaneo: %v", err)
 		return
 	}
+
+	scanID := fmt.Sprintf("%d", time.Now().UnixNano())
+	jsonData, _ := json.Marshal(result)
+	db.SaveScan(scanID, target, jsonData)
+
 	logger.Infof("Escaneo completado: %d hosts encontrados", result.TotalHosts)
 }

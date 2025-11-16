@@ -13,6 +13,8 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+	"github.com/juanotejeda/REStrike/internal/export"
+	"github.com/juanotejeda/REStrike/pkg/models"
 	"github.com/juanotejeda/REStrike/internal/scanner"
 	"github.com/juanotejeda/REStrike/internal/storage"
 	"github.com/sirupsen/logrus"
@@ -375,10 +377,26 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		return
 	}
 
+	// Parse JSON para obtener ScanResult
+	var result models.ScanResult
+	json.Unmarshal([]byte(data), &result)
+
 	backBtn := widget.NewButton("Volver", func() {
 		logger.Info("Volviendo al historial...")
 		showScanHistory(myWindow, logger, scan, db)
 	})
+
+	exportPDFBtn := widget.NewButton("Exportar PDF", func() {
+		filename := fmt.Sprintf("escaneo_%s_%s.pdf", result.Target, time.Now().Format("20060102_150405"))
+		err := export.ExportToPDF(filename, &result)
+		if err != nil {
+			logger.Errorf("Error exportando PDF: %v", err)
+		} else {
+			logger.Infof("PDF exportado: %s", filename)
+		}
+	})
+
+	buttons := container.NewHBox(exportPDFBtn, backBtn)
 
 	resultsText := widget.NewLabel(data)
 	resultsText.Alignment = fyne.TextAlignLeading
@@ -390,12 +408,11 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		widget.NewSeparator(),
 		scroll,
 		widget.NewSeparator(),
-		backBtn,
+		buttons,
 	)
 
 	myWindow.SetContent(content)
 }
-
 
 func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string) {
 	logger.Infof("Ejecutando escaneo headless contra: %s", target)

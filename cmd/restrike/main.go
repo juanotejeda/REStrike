@@ -17,6 +17,7 @@ import (
 	"github.com/juanotejeda/REStrike/pkg/models"
 	"github.com/juanotejeda/REStrike/internal/scanner"
 	"github.com/juanotejeda/REStrike/internal/storage"
+	"github.com/juanotejeda/REStrike/internal/comparison"
 	"github.com/sirupsen/logrus"
 )
 
@@ -326,7 +327,7 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 }
 
 func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
-	scans, err := db.GetScanHistory(50)
+	scans, err := db.GetAllScans()
 	if err != nil {
 		logger.Errorf("Error obteniendo historial: %v", err)
 		return
@@ -335,6 +336,11 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	backBtn := widget.NewButton("Volver", func() {
 		logger.Info("Volviendo al menú principal...")
 		showMainScreen(myWindow, logger, scan, db)
+	})
+
+	compareBtn := widget.NewButton("Comparar 2 Escaneos", func() {
+		logger.Info("Iniciando comparación...")
+		showCompareSelection(myWindow, logger, scan, db, scans)
 	})
 
 	if len(scans) == 0 {
@@ -349,25 +355,37 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 
 	items := container.NewVBox()
 	for _, s := range scans {
-		scanItem := widget.NewButton(fmt.Sprintf("%s - %s (%d hosts)", s.Target, s.Timestamp, s.TotalHosts), func(scanID string) func() {
+		scanID := s.ID
+		scanItem := widget.NewButton(fmt.Sprintf("%s - %s (%d hosts)", s.Target, s.Timestamp, s.TotalHosts), (func(id string) func() {
 			return func() {
-				logger.Infof("Viendo escaneo: %s", scanID)
+				logger.Infof("Ver detalles del escaneo: %s", id)
 				showScanDetail(myWindow, logger, scan, db, scanID)
 			}
-		}(s.ID))
+		}(s.ID)))
 		items.Add(scanItem)
 	}
 
 	scroll := container.NewScroll(items)
-	content := container.NewVBox(
-		widget.NewLabel("Historial de Escaneos"),
-		widget.NewSeparator(),
+	scroll.SetMinSize(fyne.NewSize(700, 400))
+
+	buttons := container.NewHBox(compareBtn, backBtn)
+
+	content := container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel("Historial de Escaneos"),
+			widget.NewSeparator(),
+		),
+		container.NewVBox(
+			widget.NewSeparator(),
+			buttons,
+		),
+		nil,
+		nil,
 		scroll,
-		widget.NewSeparator(),
-		backBtn,
 	)
 
 	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(800, 600))
 }
 
 func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scanID string) {
@@ -398,21 +416,164 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 
 	buttons := container.NewHBox(exportPDFBtn, backBtn)
 
-	resultsText := widget.NewLabel(data)
-	resultsText.Alignment = fyne.TextAlignLeading
-	resultsText.Wrapping = fyne.TextWrapWord
+	resultsEntry := widget.NewMultiLineEntry()
+	resultsEntry.SetText(data)
+	resultsEntry.Wrapping = fyne.TextWrapWord
+	resultsEntry.Disable()
 
-	scroll := container.NewScroll(resultsText)
-	content := container.NewVBox(
-		widget.NewLabel("Detalles del Escaneo"),
-		widget.NewSeparator(),
+	scroll := container.NewScroll(resultsEntry)
+	scroll.SetMinSize(fyne.NewSize(700, 500))
+
+	content := container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel("Detalles del Escaneo"),
+			widget.NewSeparator(),
+		),
+		container.NewVBox(
+			widget.NewSeparator(),
+			buttons,
+		),
+		nil,
+		nil,
 		scroll,
-		widget.NewSeparator(),
-		buttons,
 	)
 
 	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(800, 600))
 }
+
+func showCompareSelection(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scans []storage.ScanInfo) {
+	if len(scans) < 2 {
+		content := container.NewVBox(
+			widget.NewLabel("Necesitas al menos 2 escaneos para comparar"),
+			widget.NewSeparator(),
+			widget.NewButton("Volver", func() {
+				showScanHistory(myWindow, logger, scan, db)
+			}),
+		)
+		myWindow.SetContent(content)
+		return
+	}
+
+	var selectedScans []string
+	var checkboxes []*widget.Check
+
+	// Función para actualizar estado de checkboxes
+	updateCheckboxStates := func() {
+		for _, cb := range checkboxes {
+			if len(selectedScans) >= 2 && !cb.Checked {
+				cb.Disable()
+			} else {
+				cb.Enable()
+			}
+		}
+	}
+
+	items := container.NewVBox()
+	for _, s := range scans {
+		scanInfo := s
+		check := widget.NewCheck(fmt.Sprintf("%s - %s (%d hosts)", scanInfo.Target, scanInfo.Timestamp, scanInfo.TotalHosts), func(checked bool) {
+			if checked {
+				selectedScans = append(selectedScans, scanInfo.ID)
+			} else {
+				// Remover de selectedScans
+				for i, id := range selectedScans {
+					if id == scanInfo.ID {
+						selectedScans = append(selectedScans[:i], selectedScans[i+1:]...)
+						break
+					}
+				}
+			}
+			updateCheckboxStates()
+		})
+		checkboxes = append(checkboxes, check)
+		items.Add(check)
+	}
+
+	compareBtn := widget.NewButton("Comparar Seleccionados", func() {
+		if len(selectedScans) != 2 {
+			logger.Warn("Debes seleccionar exactamente 2 escaneos")
+			return
+		}
+		logger.Infof("Comparando: %s vs %s", selectedScans[0], selectedScans[1])
+		showComparisonResult(myWindow, logger, scan, db, selectedScans[0], selectedScans[1])
+	})
+
+	backBtn := widget.NewButton("Volver", func() {
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	buttons := container.NewHBox(compareBtn, backBtn)
+	scroll := container.NewScroll(items)
+	scroll.SetMinSize(fyne.NewSize(700, 400))
+
+	content := container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel("Selecciona 2 escaneos para comparar (máximo 2)"),
+			widget.NewSeparator(),
+		),
+		container.NewVBox(
+			widget.NewSeparator(),
+			buttons,
+		),
+		nil,
+		nil,
+		scroll,
+	)
+
+	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(800, 600))
+}
+
+
+func showComparisonResult(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scanID1, scanID2 string) {
+	// Obtener datos de ambos escaneos
+	data1, err1 := db.GetScanData(scanID1)
+	data2, err2 := db.GetScanData(scanID2)
+
+	if err1 != nil || err2 != nil {
+		logger.Errorf("Error obteniendo escaneos: %v %v", err1, err2)
+		return
+	}
+
+	var scan1, scan2 models.ScanResult
+	json.Unmarshal([]byte(data1), &scan1)
+	json.Unmarshal([]byte(data2), &scan2)
+
+	// Comparar
+	compResult := comparison.CompareScanResults(&scan1, &scan2)
+
+	backBtn := widget.NewButton("Volver", func() {
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	// Usar Entry multilínea en lugar de Label
+	resultsEntry := widget.NewMultiLineEntry()
+	resultsEntry.SetText(compResult.Summary)
+	resultsEntry.Wrapping = fyne.TextWrapWord
+	resultsEntry.Disable() // Solo lectura
+
+	scroll := container.NewScroll(resultsEntry)
+	scroll.SetMinSize(fyne.NewSize(700, 500)) // Tamaño mínimo
+
+	content := container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel("Resultado de Comparación"),
+			widget.NewSeparator(),
+		),
+		container.NewVBox(
+			widget.NewSeparator(),
+			backBtn,
+		),
+		nil,
+		nil,
+		scroll,
+	)
+
+	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(800, 600)) // Redimensionar ventana
+}
+
 
 func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string) {
 	logger.Infof("Ejecutando escaneo headless contra: %s", target)

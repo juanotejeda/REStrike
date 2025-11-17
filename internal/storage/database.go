@@ -13,6 +13,15 @@ type Database struct {
 	db *sql.DB
 }
 
+// ScanInfo información resumida de un escaneo
+type ScanInfo struct {
+	ID         string
+	Timestamp  string
+	Target     string
+	TotalHosts int
+	StatusCode int
+}
+
 // Logger interface para logging
 type Logger interface {
 	Infof(format string, args ...interface{})
@@ -138,32 +147,26 @@ func (db *Database) SaveScanResult(scanID string, result interface{}) error {
 }
 
 // GetAllScans recupera todos los escaneos
-func (db *Database) GetAllScans() ([]map[string]interface{}, error) {
+func (db *Database) GetAllScans() ([]ScanInfo, error) {
 	rows, err := db.db.Query("SELECT id, timestamp, target, total_hosts, status_code FROM scan_results ORDER BY timestamp DESC LIMIT 50")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var scans []map[string]interface{}
+	var scans []ScanInfo
 	for rows.Next() {
-		var id, timestamp, target string
-		var totalHosts, statusCode int
-		err := rows.Scan(&id, &timestamp, &target, &totalHosts, &statusCode)
+		var scan ScanInfo
+		err := rows.Scan(&scan.ID, &scan.Timestamp, &scan.Target, &scan.TotalHosts, &scan.StatusCode)
 		if err != nil {
 			continue
 		}
-		scans = append(scans, map[string]interface{}{
-			"id":          id,
-			"timestamp":   timestamp,
-			"target":      target,
-			"total_hosts": totalHosts,
-			"status_code": statusCode,
-		})
+		scans = append(scans, scan)
 	}
 
 	return scans, nil
 }
+
 
 // DeleteScan elimina un escaneo
 func (db *Database) DeleteScan(id string) error {
@@ -172,13 +175,6 @@ func (db *Database) DeleteScan(id string) error {
 }
 
 
-// ScanInfo representa info básica de un escaneo
-type ScanInfo struct {
-	ID        string
-	Timestamp string
-	Target    string
-	TotalHosts int
-}
 
 // GetScanHistory obtiene historial de escaneos
 func (db *Database) GetScanHistory(limit int) ([]ScanInfo, error) {

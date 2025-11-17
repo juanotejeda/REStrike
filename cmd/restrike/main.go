@@ -414,7 +414,28 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		}
 	})
 
-	buttons := container.NewHBox(exportPDFBtn, backBtn)
+	exportJSONBtn := widget.NewButton("Exportar JSON", func() {
+		filename := fmt.Sprintf("escaneo_%s_%s.json", result.Target, time.Now().Format("20060102_150405"))
+		err := export.ExportToJSON(filename, &result)
+		if err != nil {
+			logger.Errorf("Error exportando JSON: %v", err)
+		} else {
+			logger.Infof("JSON exportado: %s", filename)
+		}
+	})
+
+	exportCSVBtn := widget.NewButton("Exportar CSV", func() {
+		filename := fmt.Sprintf("escaneo_%s_%s.csv", result.Target, time.Now().Format("20060102_150405"))
+		err := export.ExportToCSV(filename, &result)
+		if err != nil {
+			logger.Errorf("Error exportando CSV: %v", err)
+		} else {
+			logger.Infof("CSV exportado: %s", filename)
+		}
+	})
+
+	exportButtons := container.NewHBox(exportPDFBtn, exportJSONBtn, exportCSVBtn)
+	buttons := container.NewHBox(exportButtons, backBtn)
 
 	resultsEntry := widget.NewMultiLineEntry()
 	resultsEntry.SetText(data)

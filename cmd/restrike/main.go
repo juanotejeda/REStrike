@@ -343,6 +343,11 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		showCompareSelection(myWindow, logger, scan, db, scans)
 	})
 
+	filterBtn := widget.NewButton("Filtrar", func() {
+		logger.Info("Abriendo filtros...")
+		showFilterDialog(myWindow, logger, scan, db)
+	})
+
 	if len(scans) == 0 {
 		content := container.NewVBox(
 			widget.NewLabel("No hay escaneos guardados"),
@@ -368,7 +373,7 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	scroll := container.NewScroll(items)
 	scroll.SetMinSize(fyne.NewSize(700, 400))
 
-	buttons := container.NewHBox(compareBtn, backBtn)
+	buttons := container.NewHBox(filterBtn, compareBtn, backBtn)
 
 	content := container.NewBorder(
 		container.NewVBox(
@@ -387,6 +392,7 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	myWindow.SetContent(content)
 	myWindow.Resize(fyne.NewSize(800, 600))
 }
+
 
 func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scanID string) {
 	data, err := db.GetScanData(scanID)
@@ -595,6 +601,126 @@ func showComparisonResult(myWindow fyne.Window, logger *logrus.Logger, scan *sca
 	myWindow.Resize(fyne.NewSize(800, 600)) // Redimensionar ventana
 }
 
+func showFilterDialog(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
+	targetEntry := widget.NewEntry()
+	targetEntry.SetPlaceHolder("IP o target (ej: 192.168.1.0/24)")
+
+	dateFromEntry := widget.NewEntry()
+	dateFromEntry.SetPlaceHolder("Fecha desde (ej: 2025-11-01)")
+
+	dateToEntry := widget.NewEntry()
+	dateToEntry.SetPlaceHolder("Fecha hasta (ej: 2025-11-30)")
+
+	minHostsEntry := widget.NewEntry()
+	minHostsEntry.SetPlaceHolder("Mínimo hosts (ej: 5)")
+
+	searchBtn := widget.NewButton("Buscar", func() {
+		target := targetEntry.Text
+		dateFrom := dateFromEntry.Text
+		dateTo := dateToEntry.Text
+		minHosts := 0
+		
+		if minHostsEntry.Text != "" {
+			fmt.Sscanf(minHostsEntry.Text, "%d", &minHosts)
+		}
+
+		logger.Infof("Buscando: target=%s, desde=%s, hasta=%s, minHosts=%d", target, dateFrom, dateTo, minHosts)
+		
+		scans, err := db.SearchScans(target, dateFrom, dateTo, minHosts)
+		if err != nil {
+			logger.Errorf("Error en búsqueda: %v", err)
+			return
+		}
+
+		showFilteredResults(myWindow, logger, scan, db, scans)
+	})
+
+	clearBtn := widget.NewButton("Limpiar Filtros", func() {
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	backBtn := widget.NewButton("Volver", func() {
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	form := container.NewVBox(
+		widget.NewLabel("Filtros de Búsqueda"),
+		widget.NewSeparator(),
+		widget.NewLabel("Target/IP:"),
+		targetEntry,
+		widget.NewLabel("Fecha desde (YYYY-MM-DD):"),
+		dateFromEntry,
+		widget.NewLabel("Fecha hasta (YYYY-MM-DD):"),
+		dateToEntry,
+		widget.NewLabel("Mínimo de hosts:"),
+		minHostsEntry,
+		widget.NewSeparator(),
+		container.NewHBox(searchBtn, clearBtn, backBtn),
+	)
+
+	scroll := container.NewScroll(form)
+	myWindow.SetContent(scroll)
+	myWindow.Resize(fyne.NewSize(600, 500))
+}
+
+func showFilteredResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scans []storage.ScanInfo) {
+	backBtn := widget.NewButton("Volver a Filtros", func() {
+		showFilterDialog(myWindow, logger, scan, db)
+	})
+
+	compareBtn := widget.NewButton("Comparar 2 Escaneos", func() {
+		if len(scans) < 2 {
+			logger.Warn("Necesitas al menos 2 resultados para comparar")
+			return
+		}
+		logger.Info("Iniciando comparación...")
+		showCompareSelection(myWindow, logger, scan, db, scans)
+	})
+
+	if len(scans) == 0 {
+		content := container.NewVBox(
+			widget.NewLabel("No se encontraron resultados"),
+			widget.NewSeparator(),
+			backBtn,
+		)
+		myWindow.SetContent(content)
+		return
+	}
+
+	items := container.NewVBox()
+	for _, s := range scans {
+		scanID := s.ID
+		scanItem := widget.NewButton(fmt.Sprintf("%s - %s (%d hosts)", s.Target, s.Timestamp, s.TotalHosts), (func(id string) func() {
+			return func() {
+				logger.Infof("Ver detalles del escaneo: %s", id)
+				showScanDetail(myWindow, logger, scan, db, scanID)
+			}
+		}(s.ID)))
+		items.Add(scanItem)
+	}
+
+	scroll := container.NewScroll(items)
+	scroll.SetMinSize(fyne.NewSize(700, 400))
+
+	buttons := container.NewHBox(compareBtn, backBtn)
+
+	content := container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel(fmt.Sprintf("Resultados Filtrados (%d encontrados)", len(scans))),
+			widget.NewSeparator(),
+		),
+		container.NewVBox(
+			widget.NewSeparator(),
+			buttons,
+		),
+		nil,
+		nil,
+		scroll,
+	)
+
+	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(800, 600))
+}
 
 func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string) {
 	logger.Infof("Ejecutando escaneo headless contra: %s", target)

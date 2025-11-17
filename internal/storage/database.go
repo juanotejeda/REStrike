@@ -226,3 +226,48 @@ func (db *Database) SaveScanComplete(id, target string, startTime, endTime time.
 	
 	return nil
 }
+	// SearchScans busca escaneos con filtros
+	func (db *Database) SearchScans(target, dateFrom, dateTo string, minHosts int) ([]ScanInfo, error) {
+		query := "SELECT id, timestamp, target, total_hosts, status_code FROM scan_results WHERE 1=1"
+		args := []interface{}{}
+	
+		if target != "" {
+			query += " AND target LIKE ?"
+			args = append(args, "%"+target+"%")
+		}
+	
+		if dateFrom != "" {
+			query += " AND timestamp >= ?"
+			args = append(args, dateFrom)
+		}
+	
+		if dateTo != "" {
+			query += " AND timestamp <= ?"
+			args = append(args, dateTo)
+		}
+	
+		if minHosts > 0 {
+			query += " AND total_hosts >= ?"
+			args = append(args, minHosts)
+		}
+	
+		query += " ORDER BY timestamp DESC LIMIT 50"
+	
+		rows, err := db.db.Query(query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+	
+		var scans []ScanInfo
+		for rows.Next() {
+			var scan ScanInfo
+			err := rows.Scan(&scan.ID, &scan.Timestamp, &scan.Target, &scan.TotalHosts, &scan.StatusCode)
+			if err != nil {
+				continue
+			}
+			scans = append(scans, scan)
+		}
+	
+		return scans, nil
+	}

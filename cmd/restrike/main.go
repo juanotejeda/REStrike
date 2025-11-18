@@ -18,6 +18,7 @@ import (
 	"github.com/juanotejeda/REStrike/internal/scanner"
 	"github.com/juanotejeda/REStrike/internal/storage"
 	"github.com/juanotejeda/REStrike/internal/comparison"
+	"github.com/juanotejeda/REStrike/internal/msf"
 	"github.com/sirupsen/logrus"
 )
 
@@ -145,7 +146,7 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 		showScanResults(myWindow, logger, scan, db, target)
 	})
 
-	backBtn := widget.NewButton("Volver", func() {
+	backBtn := widget.NewButton("Volver al Historial", func() {
 		logger.Info("Volviendo al menú principal...")
 		showMainScreen(myWindow, logger, scan, db)
 	})
@@ -188,7 +189,7 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	resultsText := widget.NewLabel("Escaneando... Por favor espera.")
 	resultsText.Alignment = fyne.TextAlignLeading
 
-	backBtn := widget.NewButton("Volver", func() {
+	backBtn := widget.NewButton("Volver al Historial", func() {
 		logger.Info("Volviendo al menú principal...")
 		showMainScreen(myWindow, logger, scan, db)
 	})
@@ -333,7 +334,7 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		return
 	}
 
-	backBtn := widget.NewButton("Volver", func() {
+	backBtn := widget.NewButton("Volver al Historial", func() {
 		logger.Info("Volviendo al menú principal...")
 		showMainScreen(myWindow, logger, scan, db)
 	})
@@ -405,7 +406,7 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 	var result models.ScanResult
 	json.Unmarshal([]byte(data), &result)
 
-	backBtn := widget.NewButton("Volver", func() {
+	backBtn := widget.NewButton("Volver al Historial", func() {
 		logger.Info("Volviendo al historial...")
 		showScanHistory(myWindow, logger, scan, db)
 	})
@@ -440,8 +441,14 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		}
 	})
 
+	exploitsBtn := widget.NewButton("Sugerir Exploits", func() {
+		logger.Info("Buscando exploits sugeridos...")
+		showExploitSuggestions(myWindow, logger, scan, db, &result)
+	})
+
 	exportButtons := container.NewHBox(exportPDFBtn, exportJSONBtn, exportCSVBtn)
-	buttons := container.NewHBox(exportButtons, backBtn)
+	actionButtons := container.NewHBox(exploitsBtn, exportButtons)
+	buttons := container.NewHBox(actionButtons, backBtn)
 
 	resultsEntry := widget.NewMultiLineEntry()
 	resultsEntry.SetText(data)
@@ -474,7 +481,7 @@ func showCompareSelection(myWindow fyne.Window, logger *logrus.Logger, scan *sca
 		content := container.NewVBox(
 			widget.NewLabel("Necesitas al menos 2 escaneos para comparar"),
 			widget.NewSeparator(),
-			widget.NewButton("Volver", func() {
+			widget.NewButton("Volver al Historial", func() {
 				showScanHistory(myWindow, logger, scan, db)
 			}),
 		)
@@ -526,7 +533,7 @@ func showCompareSelection(myWindow fyne.Window, logger *logrus.Logger, scan *sca
 		showComparisonResult(myWindow, logger, scan, db, selectedScans[0], selectedScans[1])
 	})
 
-	backBtn := widget.NewButton("Volver", func() {
+	backBtn := widget.NewButton("Volver al Historial", func() {
 		showScanHistory(myWindow, logger, scan, db)
 	})
 
@@ -570,7 +577,7 @@ func showComparisonResult(myWindow fyne.Window, logger *logrus.Logger, scan *sca
 	// Comparar
 	compResult := comparison.CompareScanResults(&scan1, &scan2)
 
-	backBtn := widget.NewButton("Volver", func() {
+	backBtn := widget.NewButton("Volver al Historial", func() {
 		showScanHistory(myWindow, logger, scan, db)
 	})
 
@@ -639,7 +646,7 @@ func showFilterDialog(myWindow fyne.Window, logger *logrus.Logger, scan *scanner
 		showScanHistory(myWindow, logger, scan, db)
 	})
 
-	backBtn := widget.NewButton("Volver", func() {
+	backBtn := widget.NewButton("Volver al Historial", func() {
 		showScanHistory(myWindow, logger, scan, db)
 	})
 
@@ -720,6 +727,181 @@ func showFilteredResults(myWindow fyne.Window, logger *logrus.Logger, scan *scan
 
 	myWindow.SetContent(content)
 	myWindow.Resize(fyne.NewSize(800, 600))
+}
+
+func showExploitSuggestions(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, result *models.ScanResult) {
+	// Conectar a Metasploit
+	msfClient := msf.NewClient("127.0.0.1", 55553, "mypassword123")
+	
+	statusLabel := widget.NewLabel("Conectando a Metasploit...")
+	progressBar := widget.NewProgressBarInfinite()
+	
+	backBtn := widget.NewButton("Volver al Historial", func() {
+		logger.Info("Volviendo al detalle del escaneo...")
+		showScanHistory(myWindow, logger, scan, db)
+	})
+	
+	content := container.NewVBox(statusLabel, progressBar, widget.NewSeparator(), backBtn)
+	myWindow.SetContent(content)
+
+	go func() {
+		// Login
+		if err := msfClient.Login(); err != nil {
+			logger.Errorf("Error conectando a Metasploit: %v", err)
+			errorMsg := fmt.Sprintf("Error: %v\n\n¿Está msfrpcd corriendo?\nEjecuta: msfrpcd -P mypassword123 -S -a 127.0.0.1 -p 55553", err)
+			
+			statusLabel.SetText(errorMsg)
+			progressBar.Hide()
+			myWindow.SetContent(container.NewVBox(
+				statusLabel,
+				widget.NewSeparator(),
+				widget.NewButton("Volver al Historial", func() {
+					showScanHistory(myWindow, logger, scan, db)
+				}),
+			))
+			return
+		}
+
+		logger.Info("Conectado a Metasploit, buscando exploits...")
+		statusLabel.SetText("Buscando exploits sugeridos... (esto puede tardar)")
+
+		// Sugerir exploits
+		suggestions, err := msf.SuggestExploits(msfClient, result)
+		if err != nil {
+			logger.Errorf("Error sugiriendo exploits: %v", err)
+			statusLabel.SetText(fmt.Sprintf("Error: %v", err))
+			progressBar.Hide()
+			return
+		}
+
+		if len(suggestions) == 0 {
+			statusLabel.SetText("No se encontraron exploits sugeridos para los servicios detectados")
+			progressBar.Hide()
+			myWindow.SetContent(container.NewVBox(
+				statusLabel,
+				widget.NewSeparator(),
+				widget.NewButton("Volver al Historial", func() {
+					showScanHistory(myWindow, logger, scan, db)
+				}),
+			))
+			return
+		}
+
+		logger.Infof("Se encontraron %d exploits sugeridos", len(suggestions))
+		showExploitList(myWindow, logger, scan, db, result, suggestions, msfClient)
+	}()
+}
+
+func showExploitList(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, result *models.ScanResult, suggestions []msf.ExploitSuggestion, msfClient *msf.Client) {
+	items := container.NewVBox()
+
+	for _, s := range suggestions {
+		suggestion := s
+		exploitInfo := fmt.Sprintf("%s\nTarget: %s:%d (%s)\nRank: %s",
+			suggestion.ModuleName,
+			suggestion.Target,
+			suggestion.Port,
+			suggestion.Service,
+			suggestion.Rank,
+		)
+
+		exploitBtn := widget.NewButton(exploitInfo, func() {
+			showExploitOptions(myWindow, logger, scan, db, result, suggestion, msfClient)
+		})
+		items.Add(exploitBtn)
+		items.Add(widget.NewSeparator())
+	}
+
+	backBtn := widget.NewButton("Volver al Historial", func() {
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	scroll := container.NewScroll(items)
+	scroll.SetMinSize(fyne.NewSize(700, 400))
+
+	content := container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel(fmt.Sprintf("Exploits Sugeridos (%d encontrados)", len(suggestions))),
+			widget.NewSeparator(),
+		),
+		container.NewVBox(
+			widget.NewSeparator(),
+			backBtn,
+		),
+		nil,
+		nil,
+		scroll,
+	)
+
+	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(800, 600))
+}
+
+func showExploitOptions(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, result *models.ScanResult, suggestion msf.ExploitSuggestion, msfClient *msf.Client) {
+	lhostEntry := widget.NewEntry()
+	lhostEntry.SetPlaceHolder("Tu IP (LHOST)")
+	lhostEntry.SetText("0.0.0.0")
+
+	lportEntry := widget.NewEntry()
+	lportEntry.SetPlaceHolder("Puerto local (LPORT)")
+	lportEntry.SetText("4444")
+
+	executeBtn := widget.NewButton("⚠️ EJECUTAR EXPLOIT ⚠️", func() {
+		lhost := lhostEntry.Text
+		lport := 4444
+		fmt.Sscanf(lportEntry.Text, "%d", &lport)
+
+		logger.Warnf("Ejecutando exploit: %s contra %s:%d", suggestion.ModuleName, suggestion.Target, suggestion.Port)
+
+		go func() {
+			resultMsg, err := msf.ExecuteExploit(msfClient, suggestion, lhost, lport)
+			if err != nil {
+				logger.Errorf("Error ejecutando exploit: %v", err)
+				return
+			}
+			logger.Infof("Resultado: %s", resultMsg)
+		}()
+	})
+	executeBtn.Importance = widget.DangerImportance
+
+	backBtn := widget.NewButton("Volver al Historial", func() {
+		logger.Info("Volviendo a lista de exploits...")
+		showExploitSuggestions(myWindow, logger, scan, db, result)
+	})
+	
+
+	info := widget.NewLabel(fmt.Sprintf(
+		"Exploit: %s\n\nTarget: %s:%d\nServicio: %s\nRank: %s\n\nDescripción: %s",
+		suggestion.ModuleName,
+		suggestion.Target,
+		suggestion.Port,
+		suggestion.Service,
+		suggestion.Rank,
+		suggestion.Description,
+	))
+	info.Wrapping = fyne.TextWrapWord
+
+	warning := widget.NewLabel("⚠️ ADVERTENCIA: Solo ejecuta esto en sistemas que tengas permiso para atacar")
+	warning.Importance = widget.DangerImportance
+
+	form := container.NewVBox(
+		widget.NewLabel("Opciones del Exploit"),
+		widget.NewSeparator(),
+		info,
+		widget.NewSeparator(),
+		widget.NewLabel("LHOST (tu IP):"),
+		lhostEntry,
+		widget.NewLabel("LPORT (tu puerto):"),
+		lportEntry,
+		widget.NewSeparator(),
+		warning,
+		widget.NewSeparator(),
+		container.NewHBox(executeBtn, backBtn),
+	)
+
+	scroll := container.NewScroll(form)
+	myWindow.SetContent(scroll)
+	myWindow.Resize(fyne.NewSize(700, 600))
 }
 
 func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string) {

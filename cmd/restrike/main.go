@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
@@ -84,6 +86,7 @@ func setupLogger(verbose bool) *logrus.Logger {
 
 func startGUI(logger *logrus.Logger, db *storage.Database) {
 	myApp := app.New()
+	myApp.Settings().SetTheme(&cyberpunkTheme{})
 	myWindow := myApp.NewWindow("REStrike - Pentesting Tool")
 	myWindow.Resize(fyne.NewSize(1200, 800))
 
@@ -93,6 +96,84 @@ func startGUI(logger *logrus.Logger, db *storage.Database) {
 
 	myWindow.ShowAndRun()
 }
+func showDashboard(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
+	logger.Info("Mostrando dashboard principal...")
+
+	// Título estilo cyberpunk
+	title := widget.NewLabelWithStyle("⚡ RESTRIKE CYBERSTRIKE MODE ⚡", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	
+	// Panel 1: Escaneos Recientes
+	scans, err := db.GetScanHistory(10)
+	if err != nil {
+		logger.Errorf("Error cargando historial: %v", err)
+		scans = []storage.ScanInfo{}
+	}
+
+	recentList := container.NewVBox()
+	if len(scans) > 0 {
+		maxScans := 5
+		if len(scans) < 5 {
+			maxScans = len(scans)
+		}
+		for i := 0; i < maxScans; i++ {
+			s := scans[i]
+		scanInfo := fmt.Sprintf("🎯 %s | Hosts: %d | %s", s.Target, s.TotalHosts, s.Timestamp)
+		recentList.Add(widget.NewLabel(scanInfo))
+		}
+	} else {
+		recentList.Add(widget.NewLabel("Sin escaneos recientes"))
+	}
+
+	recentPanel := container.NewBorder(
+		widget.NewLabelWithStyle("📊 ESCANEOS RECIENTES", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		nil, nil, nil,
+		container.NewVScroll(recentList),
+	)
+
+	// Panel 2: Estadísticas
+	totalScans := len(scans)
+	statsList := container.NewVBox(
+		widget.NewLabel(fmt.Sprintf("Total Escaneos: %d", totalScans)),
+		widget.NewLabel(fmt.Sprintf("Última actividad: %s", time.Now().Format("15:04"))),
+	)
+
+	statsPanel := container.NewBorder(
+		widget.NewLabelWithStyle("📈 ESTADÍSTICAS", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		nil, nil, nil,
+		statsList,
+	)
+
+	// Panel 3: Acciones rápidas
+	newScanBtn := widget.NewButton("🔍 NUEVO ESCANEO", func() {
+		showScanForm(myWindow, logger, scan, db)
+	})
+
+	historyBtn := widget.NewButton("📋 HISTORIAL", func() {
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	compareBtn := widget.NewButton("⚖️ COMPARAR", func() {
+		scans, _ := db.GetScanHistory(10)
+		showCompareSelection(myWindow, logger, scan, db, scans)
+	})
+
+	actionsPanel := container.NewBorder(
+		widget.NewLabelWithStyle("⚡ ACCIONES RÁPIDAS", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		nil, nil, nil,
+		container.NewVBox(newScanBtn, historyBtn, compareBtn),
+	)
+
+	// Layout grid responsive
+	mainGrid := container.NewAdaptiveGrid(2, recentPanel, statsPanel, actionsPanel)
+
+	content := container.NewBorder(
+		container.NewVBox(title, widget.NewSeparator()),
+		nil, nil, nil,
+		container.NewVScroll(mainGrid),
+	)
+
+	myWindow.SetContent(content)
+}
 
 func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	title := widget.NewLabel("REStrike v0.1.0")
@@ -101,6 +182,9 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 	subtitle := widget.NewLabel("Herramienta de Pentesting Visual para #RE Community")
 	subtitle.Alignment = fyne.TextAlignCenter
 
+		dashboardBtn := widget.NewButton("🚀 Dashboard", func() {
+		showDashboard(myWindow, logger, scan, db)
+	})
 		startBtn := widget.NewButton("Nuevo Escaneo", func() {
 		logger.Info("Abriendo formulario de escaneo...")
 		showScanForm(myWindow, logger, scan, db)
@@ -116,7 +200,7 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		os.Exit(0)
 	})
 
-	buttons := container.NewHBox(startBtn, historyBtn, exitBtn)
+	buttons := container.NewHBox(dashboardBtn, startBtn, historyBtn, exitBtn)
 
 
 	content := container.NewVBox(
@@ -919,4 +1003,36 @@ func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string)
 	db.SaveScan(scanID, target, jsonData)
 
 	logger.Infof("Escaneo completado: %d hosts encontrados", result.TotalHosts)
+}
+
+// Tema cyberpunk/hacker inspirado en Bjorn
+type cyberpunkTheme struct{}
+
+func (c *cyberpunkTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	switch name {
+	case theme.ColorNameBackground:
+		return color.RGBA{10, 10, 10, 255}
+	case theme.ColorNameForeground:
+		return color.RGBA{57, 255, 20, 255}
+	case theme.ColorNamePrimary:
+		return color.RGBA{0, 255, 255, 255}
+	case theme.ColorNameButton:
+		return color.RGBA{0, 100, 0, 255}
+	case theme.ColorNameInputBackground:
+		return color.RGBA{20, 20, 20, 255}
+	default:
+		return theme.DefaultTheme().Color(name, variant)
+	}
+}
+
+func (c *cyberpunkTheme) Size(name fyne.ThemeSizeName) float32 {
+	return theme.DefaultTheme().Size(name)
+}
+
+func (c *cyberpunkTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return theme.DefaultTheme().Font(style)
+}
+
+func (c *cyberpunkTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	return theme.DefaultTheme().Icon(name)
 }

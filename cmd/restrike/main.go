@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"context"
 	"encoding/json"
 	"flag"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"os/exec"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
@@ -28,6 +30,15 @@ var (
 	version = "0.1.0"
 	commit  = "dev"
 )
+var uiLogs []string
+const maxUILogs = 50
+
+func appendUILog(log string) {
+	if len(uiLogs) >= maxUILogs {
+		uiLogs = uiLogs[1:]
+	}
+	uiLogs = append(uiLogs, log)
+}
 
 func main() {
 	verbose := flag.Bool("v", false, "Verbose output")
@@ -80,8 +91,19 @@ func setupLogger(verbose bool) *logrus.Logger {
 		FullTimestamp: true,
 		ForceColors:   true,
 	})
-
+	logger.AddHook(&UILogHook{})
 	return logger
+}
+type UILogHook struct{}
+
+func (h *UILogHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+func (h *UILogHook) Fire(e *logrus.Entry) error {
+	logstr := fmt.Sprintf("[%s] %s", strings.ToUpper(e.Level.String()), e.Message)
+	appendUILog(logstr)
+	return nil
 }
 
 func startGUI(logger *logrus.Logger, db *storage.Database) {
@@ -96,13 +118,45 @@ func startGUI(logger *logrus.Logger, db *storage.Database) {
 
 	myWindow.ShowAndRun()
 }
+
 func showDashboard(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	logger.Info("Mostrando dashboard principal...")
 
-	// Título estilo cyberpunk
-	title := widget.NewLabelWithStyle("⚡ RESTRIKE CYBERSTRIKE MODE ⚡", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-	
-	// Panel 1: Escaneos Recientes
+	// Barra de estado inferior
+	statusLabel := widget.NewLabelWithStyle("Listo.", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true, Monospace: true})
+
+	// Verificar msfrpcd corriendo
+	isMsfRpcdRunning := func() bool {
+		cmd := exec.Command("pgrep", "-f", "msfrpcd -P mypassword123 -S -a 127.0.0.1 -p 55553")
+		return cmd.Run() == nil
+	}
+
+	var startMsfBtn *widget.Button
+	if !isMsfRpcdRunning() {
+		startMsfBtn = widget.NewButton("Iniciar msfrpcd", func() {
+			go func() {
+				cmd := exec.Command("msfrpcd", "-P", "mypassword123", "-S", "-a", "127.0.0.1", "-p", "55553")
+				if err := cmd.Start(); err != nil {
+					logger.Errorf("Error iniciando msfrpcd: %v", err)
+					statusLabel.SetText("Error iniciando msfrpcd")
+				} else {
+					logger.Info("msfrpcd iniciado")
+					statusLabel.SetText("msfrpcd iniciado 🎉")
+					startMsfBtn.Disable()
+				}
+			}()
+		})
+		startMsfBtn.Importance = widget.HighImportance
+	} else {
+		startMsfBtn = widget.NewButton("msfrpcd corriendo", func() {})
+		startMsfBtn.Disable()
+	}
+
+	backBtn := widget.NewButton("⬅ Volver", func() {
+		showMainScreen(myWindow, logger, scan, db)
+	})
+
+	// ---------- ESCANEOS RECIENTES ----------
 	scans, err := db.GetScanHistory(10)
 	if err != nil {
 		logger.Errorf("Error cargando historial: %v", err)
@@ -110,70 +164,126 @@ func showDashboard(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sc
 	}
 
 	recentList := container.NewVBox()
-	if len(scans) > 0 {
-		maxScans := 5
-		if len(scans) < 5 {
-			maxScans = len(scans)
-		}
-		for i := 0; i < maxScans; i++ {
-			s := scans[i]
-		scanInfo := fmt.Sprintf("🎯 %s | Hosts: %d | %s", s.Target, s.TotalHosts, s.Timestamp)
-		recentList.Add(widget.NewLabel(scanInfo))
-		}
-	} else {
-		recentList.Add(widget.NewLabel("Sin escaneos recientes"))
+	maxScans := 5
+	if len(scans) < 5 { maxScans = len(scans) }
+	for i := 0; i < maxScans; i++ {
+		s := scans[i]
+		info := fmt.Sprintf("🎯 %s | Hosts: %d | %s", s.Target, s.TotalHosts, s.Timestamp)
+		lbl := widget.NewLabelWithStyle(info, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
+		recentList.Add(lbl)
+	}
+	if maxScans == 0 {
+		recentList.Add(widget.NewLabelWithStyle("Sin escaneos recientes", fyne.TextAlignCenter, fyne.TextStyle{Monospace: true}))
 	}
 
-	recentPanel := container.NewBorder(
+	recentPanel := container.NewVBox(
 		widget.NewLabelWithStyle("📊 ESCANEOS RECIENTES", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		nil, nil, nil,
-		container.NewVScroll(recentList),
+		widget.NewSeparator(),
+		recentList,
 	)
 
-	// Panel 2: Estadísticas
+	// ---------- ESTADÍSTICAS ----------
 	totalScans := len(scans)
-	statsList := container.NewVBox(
-		widget.NewLabel(fmt.Sprintf("Total Escaneos: %d", totalScans)),
-		widget.NewLabel(fmt.Sprintf("Última actividad: %s", time.Now().Format("15:04"))),
-	)
-
-	statsPanel := container.NewBorder(
+	statsPanel := container.NewVBox(
 		widget.NewLabelWithStyle("📈 ESTADÍSTICAS", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		nil, nil, nil,
-		statsList,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle(fmt.Sprintf("Total Escaneos: %d", totalScans), fyne.TextAlignLeading, fyne.TextStyle{Monospace: true}),
+		widget.NewLabelWithStyle(fmt.Sprintf("Última actividad: %s", time.Now().Format("15:04")), fyne.TextAlignLeading, fyne.TextStyle{Monospace: true}),
 	)
 
-	// Panel 3: Acciones rápidas
-	newScanBtn := widget.NewButton("🔍 NUEVO ESCANEO", func() {
+	// ---------- ACCIONES RÁPIDAS ----------
+	newScanBtn := widget.NewButton("🔍 Nuevo Escaneo", func() {
 		showScanForm(myWindow, logger, scan, db)
 	})
-
-	historyBtn := widget.NewButton("📋 HISTORIAL", func() {
+	historyBtn := widget.NewButton("📋 Historial", func() {
 		showScanHistory(myWindow, logger, scan, db)
 	})
-
-	compareBtn := widget.NewButton("⚖️ COMPARAR", func() {
+	compareBtn := widget.NewButton("⚖️ Comparar", func() {
 		scans, _ := db.GetScanHistory(10)
 		showCompareSelection(myWindow, logger, scan, db, scans)
 	})
-
-	actionsPanel := container.NewBorder(
+	actionsPanel := container.NewVBox(
 		widget.NewLabelWithStyle("⚡ ACCIONES RÁPIDAS", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		nil, nil, nil,
-		container.NewVBox(newScanBtn, historyBtn, compareBtn),
+		widget.NewSeparator(),
+		newScanBtn,
+		historyBtn,
+		compareBtn,
+		startMsfBtn,
+		backBtn,
 	)
 
-	// Layout grid responsive
-	mainGrid := container.NewAdaptiveGrid(2, recentPanel, statsPanel, actionsPanel)
+	// ---------- PANEL IZQUIERDO DASHBOARD ----------
+	leftPanel := container.NewVBox(
+		recentPanel,
+		statsPanel,
+		actionsPanel,
+	)
+	leftScroll := container.NewVScroll(leftPanel)
+	leftScroll.Resize(fyne.NewSize(600, 680))
+
+	// ---------- SYSTEM LOG STREAM ----------
+	logTitle := widget.NewLabelWithStyle("SYSTEM LOG STREAM", fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Monospace: true})
+
+	maxLogs := 10
+	startLog := 0
+	if len(uiLogs) > maxLogs { startLog = len(uiLogs) - maxLogs }
+	logsList := container.NewVBox()
+	for _, logLine := range uiLogs[startLog:] {
+		lbl := widget.NewLabelWithStyle(logLine, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
+		logsList.Add(lbl)
+	}
+
+// Scroll con altura mínima suficiente para que se lean 8–10 líneas
+	logsScroll := container.NewVScroll(logsList)
+	logsScroll.SetMinSize(fyne.NewSize(0, 200)) // Ajusta 200 para ~8 líneas, sube para más
+
+	logPanel := container.NewVBox(
+		logTitle,
+		widget.NewSeparator(),
+		logsScroll,
+	)
+
+	// Timer para refrescar logs (VBox)
+	go func() {
+		for {
+			time.Sleep(2 * time.Second)
+			for len(logsList.Objects) > 0 {
+				logsList.Remove(logsList.Objects[0])
+			}
+			startLog := 0
+			if len(uiLogs) > maxLogs { startLog = len(uiLogs) - maxLogs }
+			for _, logLine := range uiLogs[startLog:] {
+				lbl := widget.NewLabelWithStyle(logLine, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
+				logsList.Add(lbl)
+			}
+			logsList.Refresh()
+		}
+	}()
+
+	// ---------- LAYOUT PRINCIPAL ----------
+	split := container.NewHSplit(
+		leftScroll,
+		logPanel,
+	)
+	split.Offset = 0.50 // Mitad y mitad
+
+	bottomBar := container.NewHBox(
+		statusLabel,
+	)
+
+	title := widget.NewLabelWithStyle("⚡ RESTRIKE CYBERSTRIKE MODE ⚡", fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Monospace: true})
 
 	content := container.NewBorder(
-		container.NewVBox(title, widget.NewSeparator()),
-		nil, nil, nil,
-		container.NewVScroll(mainGrid),
+		container.NewVBox(title, widget.NewSeparator()), // arriba
+		nil, nil,
+		bottomBar, // abajo
+		split,     // centro
 	)
 
 	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(1200, 720))
 }
+
 
 func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	title := widget.NewLabel("REStrike v0.1.0")

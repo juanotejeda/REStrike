@@ -1,141 +1,76 @@
 package msf
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
-	"net/http"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strings"
 
-	"github.com/vmihailenco/msgpack/v5"
+	"github.com/juanotejeda/REStrike/pkg/models"
 )
 
-// Client cliente para Metasploit RPC
+// Client cliente para Metasploit que lee desde archivos JSON
 type Client struct {
-	Host     string
-	Port     int
-	Password string
-	Token    string
-	client   *http.Client
+	MetadataPath string
+	ExploitCache map[string]interface{}
+}
+
+// ModuleMetadata estructura de metadatos de Metasploit
+type ModuleMetadata struct {
+	Modules map[string]interface{} `json:"modules"`
 }
 
 // NewClient crea un nuevo cliente Metasploit
 func NewClient(host string, port int, password string) *Client {
+	// Por ahora ignoramos host/port/password y usamos archivos locales
+	msfPath := filepath.Join(os.Getenv("HOME"), ".msf4", "store", "modules_metadata.json")
+	
 	return &Client{
-		Host:     host,
-		Port:     port,
-		Password: password,
-		client:   &http.Client{},
+		MetadataPath: msfPath,
+		ExploitCache: make(map[string]interface{}),
 	}
 }
 
-// call realiza una llamada RPC
-func (c *Client) call(method string, args ...interface{}) (map[string]interface{}, error) {
-	url := fmt.Sprintf("http://%s:%d/api/", c.Host, c.Port)
-
-	// Construir payload
-	payload := []interface{}{method}
-	if c.Token != "" {
-		payload = append(payload, c.Token)
-	}
-	payload = append(payload, args...)
-
-	// Serializar con MessagePack
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("error serializando: %w", err)
-	}
-
-	// Hacer request
-	resp, err := c.client.Post(url, "binary/message-pack", bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("error en request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Decodificar respuesta
-	var result map[string]interface{}
-	decoder := msgpack.NewDecoder(resp.Body)
-	if err := decoder.Decode(&result); err != nil {
-		return nil, fmt.Errorf("error decodificando: %w", err)
-	}
-
-	// Verificar errores
-	if errMsg, ok := result["error"]; ok {
-		return nil, fmt.Errorf("error MSF: %v", errMsg)
-	}
-
-	return result, nil
-}
-
-// Login autentica con Metasploit
+// Login simula autenticación (ya no necesaria con archivos)
 func (c *Client) Login() error {
-	result, err := c.call("auth.login", "msf", c.Password)
-	if err != nil {
-		return err
-	}
-
-	// El token puede venir como string o []byte
-	if token, ok := result["token"].(string); ok {
-		c.Token = token
-		return nil
+	fmt.Println("[*] Leyendo metadatos de Metasploit desde", c.MetadataPath)
+	
+	// Verificar que el archivo existe
+	if _, err := os.Stat(c.MetadataPath); err != nil {
+		return fmt.Errorf("archivo de metadatos no encontrado: %s", c.MetadataPath)
 	}
 	
-	if tokenBytes, ok := result["token"].([]byte); ok {
-		c.Token = string(tokenBytes)
-		return nil
-	}
-
-	return fmt.Errorf("no se obtuvo token, respuesta: %v", result)
-}
-
-// SearchModules busca módulos por palabra clave
-func (c *Client) SearchModules(query string) ([]string, error) {
-	result, err := c.call("module.search", query)
-	if err != nil {
-		return nil, err
-	}
-
-	if modules, ok := result["modules"].([]interface{}); ok {
-		var moduleNames []string
-		for _, m := range modules {
-			if name, ok := m.(string); ok {
-				moduleNames = append(moduleNames, name)
-			}
-		}
-		return moduleNames, nil
-	}
-
-	return []string{}, nil
-}
-
-// GetModuleInfo obtiene información de un módulo
-func (c *Client) GetModuleInfo(moduleType, moduleName string) (map[string]interface{}, error) {
-	return c.call("module.info", moduleType, moduleName)
-}
-
-// ExecuteModule ejecuta un módulo exploit
-func (c *Client) ExecuteModule(moduleType, moduleName string, options map[string]string) (map[string]interface{}, error) {
-	return c.call("module.execute", moduleType, moduleName, options)
+	return nil
 }
 
 // ListExploits lista todos los módulos exploit disponibles
 func (c *Client) ListExploits() ([]string, error) {
-	result, err := c.call("module.exploits")
+	// Leer archivo de metadatos
+	data, err := ioutil.ReadFile(c.MetadataPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error leyendo metadatos: %w", err)
 	}
 
-	if modules, ok := result["modules"].([]interface{}); ok {
-		var moduleNames []string
-		for _, m := range modules {
-			if name, ok := m.(string); ok {
-				moduleNames = append(moduleNames, name)
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("error parseando JSON: %w", err)
+	}
+
+	var exploits []string
+
+	// Extraer exploits del JSON
+	if modules, ok := metadata["modules"].(map[string]interface{}); ok {
+		for path := range modules {
+			// Filtrar solo exploits (contienen "exploits" en la ruta)
+			if strings.Contains(path, "/exploits/") {
+				exploits = append(exploits, path)
 			}
 		}
-		return moduleNames, nil
 	}
 
-	return []string{}, nil
+	return exploits, nil
 }
 
 // GetExploits busca exploits por servicio/puerto
@@ -146,29 +81,178 @@ func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}
 		return nil, err
 	}
 
+	// Leer archivo para obtener metadatos completos
+	data, err := ioutil.ReadFile(c.MetadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("error leyendo metadatos: %w", err)
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("error parseando JSON: %w", err)
+	}
+
 	var exploits []map[string]interface{}
 	serviceLower := strings.ToLower(service)
-	
-	// Filtrar manualmente por servicio
-	for _, name := range allModules {
+	modules := metadata["modules"].(map[string]interface{})
+
+	// Filtrar y buscar coincidencias
+	for _, modulePath := range allModules {
 		if len(exploits) >= 10 { // Limitar a 10 resultados
 			break
 		}
+
+		pathLower := strings.ToLower(modulePath)
 		
-		nameLower := strings.ToLower(name)
 		// Buscar coincidencia con el servicio
-		if strings.Contains(nameLower, serviceLower) || 
-		   strings.Contains(nameLower, fmt.Sprintf("%d", port)) {
-			info, err := c.GetModuleInfo("exploit", name)
-			if err != nil {
+		if strings.Contains(pathLower, serviceLower) {
+			moduleInfo, ok := modules[modulePath].(map[string]interface{})
+			if !ok {
 				continue
 			}
+
 			exploits = append(exploits, map[string]interface{}{
-				"name": name,
-				"info": info,
+				"name": modulePath,
+				"info": moduleInfo,
 			})
 		}
 	}
 
 	return exploits, nil
+}
+
+// SearchModules busca módulos por palabra clave
+func (c *Client) SearchModules(query string) ([]string, error) {
+	allModules, err := c.ListExploits()
+	if err != nil {
+		return nil, err
+	}
+
+	var results []string
+	queryLower := strings.ToLower(query)
+
+	for _, module := range allModules {
+		if strings.Contains(strings.ToLower(module), queryLower) {
+			results = append(results, module)
+		}
+	}
+
+	return results, nil
+}
+
+// GetModuleInfo obtiene información de un módulo
+func (c *Client) GetModuleInfo(moduleType, moduleName string) (map[string]interface{}, error) {
+	data, err := ioutil.ReadFile(c.MetadataPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, err
+	}
+
+	modules := metadata["modules"].(map[string]interface{})
+	
+	if moduleInfo, ok := modules[moduleName].(map[string]interface{}); ok {
+		return moduleInfo, nil
+	}
+
+	return nil, fmt.Errorf("módulo no encontrado: %s", moduleName)
+}
+
+// ExecuteModule ejecuta un módulo exploit (simulado)
+func (c *Client) ExecuteModule(moduleType, moduleName string, options map[string]string) (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"job_id": "job_placeholder",
+		"status": "executed",
+	}, nil
+}
+
+// ExploitSuggestion sugerencia de exploit
+type ExploitSuggestion struct {
+	ModuleName  string
+	Description string
+	Rank        string
+	Target      string
+	Port        int
+	Service     string
+}
+
+// SuggestExploits sugiere exploits basados en resultados de escaneo
+func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSuggestion, error) {
+	var suggestions []ExploitSuggestion
+	searched := make(map[string]bool)
+
+	for _, host := range result.Hosts {
+		for _, port := range host.Ports {
+			if port.State != "open" {
+				continue
+			}
+
+			// Buscar por múltiples términos
+			searchTerms := []string{
+				port.Service,
+				fmt.Sprintf("%s %d", port.Service, port.ID),
+			}
+
+			// Agregar versión si existe
+			if port.Version != "" {
+				searchTerms = append(searchTerms, fmt.Sprintf("%s %s", port.Service, port.Version))
+			}
+
+			for _, term := range searchTerms {
+				if term == "" || searched[term] {
+					continue
+				}
+				searched[term] = true
+
+				// Buscar exploits para este servicio
+				exploits, err := client.GetExploits(term, port.ID)
+				if err != nil {
+					continue
+				}
+
+				for _, exploit := range exploits {
+					name, ok := exploit["name"].(string)
+					if !ok {
+						continue
+					}
+
+					description := "N/A"
+					rank := "unknown"
+
+					if info, ok := exploit["info"].(map[string]interface{}); ok {
+						if desc, ok := info["description"].(string); ok {
+							description = desc
+						} else if descBytes, ok := info["description"].([]byte); ok {
+							description = string(descBytes)
+						}
+
+						if r, ok := info["rank"].(string); ok {
+							rank = r
+						} else if rBytes, ok := info["rank"].([]byte); ok {
+							rank = string(rBytes)
+						}
+					}
+
+					suggestions = append(suggestions, ExploitSuggestion{
+						ModuleName:  name,
+						Description: description,
+						Rank:        rank,
+						Target:      host.IP,
+						Port:        port.ID,
+						Service:     port.Service,
+					})
+				}
+			}
+		}
+	}
+
+	return suggestions, nil
+}
+
+// ExecuteExploit ejecuta un exploit contra un target (simulado)
+func ExecuteExploit(client *Client, suggestion ExploitSuggestion, lhost string, lport int) (string, error) {
+	return fmt.Sprintf("Exploit %s ejecutado contra %s:%d", suggestion.ModuleName, suggestion.Target, suggestion.Port), nil
 }

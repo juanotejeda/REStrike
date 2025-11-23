@@ -17,14 +17,8 @@ type Client struct {
 	ExploitCache map[string]interface{}
 }
 
-// ModuleMetadata estructura de metadatos de Metasploit
-type ModuleMetadata struct {
-	Modules map[string]interface{} `json:"modules"`
-}
-
 // NewClient crea un nuevo cliente Metasploit
 func NewClient(host string, port int, password string) *Client {
-	// Por ahora ignoramos host/port/password y usamos archivos locales
 	msfPath := filepath.Join(os.Getenv("HOME"), ".msf4", "store", "modules_metadata.json")
 	
 	return &Client{
@@ -33,11 +27,10 @@ func NewClient(host string, port int, password string) *Client {
 	}
 }
 
-// Login simula autenticación (ya no necesaria con archivos)
+// Login verifica que el archivo existe
 func (c *Client) Login() error {
 	fmt.Println("[*] Leyendo metadatos de Metasploit desde", c.MetadataPath)
 	
-	// Verificar que el archivo existe
 	if _, err := os.Stat(c.MetadataPath); err != nil {
 		return fmt.Errorf("archivo de metadatos no encontrado: %s", c.MetadataPath)
 	}
@@ -47,7 +40,6 @@ func (c *Client) Login() error {
 
 // ListExploits lista todos los módulos exploit disponibles
 func (c *Client) ListExploits() ([]string, error) {
-	// Leer archivo de metadatos
 	data, err := ioutil.ReadFile(c.MetadataPath)
 	if err != nil {
 		return nil, fmt.Errorf("error leyendo metadatos: %w", err)
@@ -60,28 +52,28 @@ func (c *Client) ListExploits() ([]string, error) {
 
 	var exploits []string
 
-	// Extraer exploits del JSON
-	if modules, ok := metadata["modules"].(map[string]interface{}); ok {
-		for path := range modules {
-			// Filtrar solo exploits (contienen "exploits" en la ruta)
-			if strings.Contains(path, "/exploits/") {
-				exploits = append(exploits, path)
-			}
+	// Los exploits están con claves como "exploit_windows_..." o "exploit_linux_..."
+	// Los auxiliares como "auxiliary_admin_...", "auxiliary_scanner_..."
+	for path := range metadata {
+		// Filtrar solo exploits (comienzan con "exploit_")
+		if strings.HasPrefix(path, "exploit_") {
+			exploits = append(exploits, path)
 		}
 	}
 
+	fmt.Printf("[DEBUG] Total exploits encontrados: %d\n", len(exploits))
 	return exploits, nil
 }
 
 // GetExploits busca exploits por servicio/puerto
 func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}, error) {
-	// Listar todos los exploits
+	fmt.Printf("[DEBUG] Buscando exploits para servicio: %s, puerto: %d\n", service, port)
+	
 	allModules, err := c.ListExploits()
 	if err != nil {
 		return nil, err
 	}
 
-	// Leer archivo para obtener metadatos completos
 	data, err := ioutil.ReadFile(c.MetadataPath)
 	if err != nil {
 		return nil, fmt.Errorf("error leyendo metadatos: %w", err)
@@ -94,30 +86,31 @@ func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}
 
 	var exploits []map[string]interface{}
 	serviceLower := strings.ToLower(service)
-	modules := metadata["modules"].(map[string]interface{})
-
-	// Filtrar y buscar coincidencias
+	
+	matchCount := 0
 	for _, modulePath := range allModules {
-		if len(exploits) >= 10 { // Limitar a 10 resultados
+		if len(exploits) >= 10 {
 			break
 		}
 
 		pathLower := strings.ToLower(modulePath)
 		
-		// Buscar coincidencia con el servicio
 		if strings.Contains(pathLower, serviceLower) {
-			moduleInfo, ok := modules[modulePath].(map[string]interface{})
+			moduleInfo, ok := metadata[modulePath].(map[string]interface{})
 			if !ok {
 				continue
 			}
 
+			matchCount++
+			fmt.Printf("[DEBUG] Exploit encontrado: %s\n", modulePath)
 			exploits = append(exploits, map[string]interface{}{
 				"name": modulePath,
 				"info": moduleInfo,
 			})
 		}
 	}
-
+	
+	fmt.Printf("[DEBUG] Total matches para '%s': %d\n", service, matchCount)
 	return exploits, nil
 }
 
@@ -152,9 +145,7 @@ func (c *Client) GetModuleInfo(moduleType, moduleName string) (map[string]interf
 		return nil, err
 	}
 
-	modules := metadata["modules"].(map[string]interface{})
-	
-	if moduleInfo, ok := modules[moduleName].(map[string]interface{}); ok {
+	if moduleInfo, ok := metadata[moduleName].(map[string]interface{}); ok {
 		return moduleInfo, nil
 	}
 
@@ -184,19 +175,22 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 	var suggestions []ExploitSuggestion
 	searched := make(map[string]bool)
 
+	fmt.Printf("[DEBUG] Analizando %d hosts para sugerir exploits\n", len(result.Hosts))
+
 	for _, host := range result.Hosts {
+		fmt.Printf("[DEBUG] Host: %s\n", host.IP)
 		for _, port := range host.Ports {
 			if port.State != "open" {
 				continue
 			}
 
-			// Buscar por múltiples términos
+			fmt.Printf("[DEBUG]   Puerto %d/%s - Servicio: %s (Version: %s)\n", port.ID, port.Protocol, port.Service, port.Version)
+
 			searchTerms := []string{
 				port.Service,
 				fmt.Sprintf("%s %d", port.Service, port.ID),
 			}
 
-			// Agregar versión si existe
 			if port.Version != "" {
 				searchTerms = append(searchTerms, fmt.Sprintf("%s %s", port.Service, port.Version))
 			}
@@ -207,9 +201,9 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 				}
 				searched[term] = true
 
-				// Buscar exploits para este servicio
 				exploits, err := client.GetExploits(term, port.ID)
 				if err != nil {
+					fmt.Printf("[DEBUG] Error buscando exploits para '%s': %v\n", term, err)
 					continue
 				}
 
@@ -249,6 +243,7 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 		}
 	}
 
+	fmt.Printf("[DEBUG] Total sugerencias: %d\n", len(suggestions))
 	return suggestions, nil
 }
 

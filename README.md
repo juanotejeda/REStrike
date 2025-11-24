@@ -38,28 +38,32 @@ Herramienta multiplataforma de pentesting visual, escaneo de red y explotación,
 
 ### Instalación en Linux Debian/Ubuntu / Kali
 
+#### Actualizamos el repositorio e instalamos las librerias necesarias.
+```bash
 sudo apt-get update
 sudo apt-get install -y nmap golang-go git libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libgl1-mesa-dev
-
-text
-undefined
+```
+#### Clonamos el git, ingresamos a la carpeta de la aplicacion y desdecargamos los modulos necesarios para compilar la aplicacion.
+```bash
 git clone https://github.com/juanotejeda/REStrike.git
 cd REStrike
 go mod download && go mod tidy
 make build
 ./restrike
+```
 
-text
 
 ---
 
 ## 📖 Uso Rápido
 
 ### Modo GUI (Recomendado)
+```bash
 
 ./restrike
 
-text
+```
+
 
 Pasos:
 
@@ -72,10 +76,10 @@ Pasos:
 7. Generar reporte (PDF/HTML)
 
 ### Modo Headless (Línea de comandos)
-
+```bash
 ./restrike -headless -target 192.168.1.1
 
-text
+```
 
 ---
 

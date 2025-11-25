@@ -40,3 +40,8 @@ reports/
 # Archivos temporales
 tmp/
 temp/
+escaneo_*.csv
+escaneo_*.json
+exploits_list.txt
+msf_test.py
+msfinstall

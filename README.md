@@ -32,9 +32,10 @@ Herramienta multiplataforma de pentesting visual, escaneo de red y explotación,
 
 ### Requisitos Mínimos
 
-- Go 1.21 o superior
-- Nmap instalado en el sistema
-- Git
+- Go 1.21 o superior.
+- Nmap instalado en el sistema.
+- Metasploit instalado en el sistema.
+- Git.
 
 ### Instalación en Linux Debian/Ubuntu / Kali
 

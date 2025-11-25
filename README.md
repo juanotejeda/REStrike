@@ -14,15 +14,15 @@ Herramienta multiplataforma de pentesting visual, escaneo de red y explotación,
 ## ✨ Características Principales
 
 - 🔍 **Escaneo de Red Inteligente**: Integración completa con Nmap + scripts NSE automáticos
-- 📊 **Visualización Gráfica Interactiva**: Grafo en tiempo real de hosts, servicios y relaciones
+- 📊 **Visualización Gráfica Interactiva**: Grafo en tiempo real de hosts, servicios y relaciones - Proximamente :D
 - 🎯 **Explotación Integrada (condicional)**: Actualmente solo se listan exploits a partir de metadatos JSON locales
 - 📋 **Reportes Profesionales**: Generación automática en PDF, HTML y JSON
 - 🏷️ **Categorización Inteligente**: Clasificación automática OWASP Top 10 y CWE
 - 💾 **Base de Datos Local**: SQLite con cifrado AES-256 de credenciales
 - 🖥️ **Multiplataforma Nativa**: Compilación para Linux, macOS, Windows
 - 🎨 **GUI Moderna**: Interfaz gráfica con Fyne (sin dependencias externas)
-- 🔐 **Seguridad Integrada**: Logging auditado, control RBAC, validación de entrada
-- 👥 **Multi-usuario**: Sistema de roles (Admin, Pentester, Viewer)
+- 🔐 **Seguridad Integrada**: Logging auditado, control RBAC, validación de entrada - Proximamente :D
+- 👥 **Multi-usuario**: Sistema de roles (Admin, Pentester, Viewer) - Proximamente :D
 - 📈 **Dashboard en Tiempo Real**: Estadísticas dinámicas y progreso de escaneos
 - 🎓 **Educativo**: Perfecto para laboratorios, capacitación y CTF
 

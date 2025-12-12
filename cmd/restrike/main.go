@@ -1050,17 +1050,21 @@ func showExploitList(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 
 	for _, s := range suggestions {
 		suggestion := s
-		exploitInfo := fmt.Sprintf("%s\nTarget: %s:%d (%s)\nRank: %s",
-			suggestion.ModuleName,
+
+		title := fmt.Sprintf("%s", suggestion.ModuleName)
+		subtitle := fmt.Sprintf("Target: %s:%d (%s)  |  Rank: %s",
 			suggestion.Target,
 			suggestion.Port,
 			suggestion.Service,
 			suggestion.Rank,
 		)
 
-		exploitBtn := widget.NewButton(exploitInfo, func() {
+		exploitBtn := widget.NewButton("", func() {
 			showExploitOptions(myWindow, logger, scan, db, result, suggestion, msfClient)
 		})
+
+		exploitBtn.SetText(fmt.Sprintf("%s\n%s", title, subtitle))
+
 		items.Add(exploitBtn)
 		items.Add(widget.NewSeparator())
 	}
@@ -1074,7 +1078,7 @@ func showExploitList(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 
 	content := container.NewBorder(
 		container.NewVBox(
-			widget.NewLabel(fmt.Sprintf("Exploits Sugeridos (%d encontrados)", len(suggestions))),
+			widget.NewLabel(fmt.Sprintf("Exploits Sugeridos (%d mostrados)", len(suggestions))),
 			widget.NewSeparator(),
 		),
 		container.NewVBox(

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sort"
 
 	"github.com/juanotejeda/REStrike/pkg/models"
 )
@@ -68,7 +69,7 @@ func (c *Client) ListExploits() ([]string, error) {
 // GetExploits busca exploits por servicio/puerto
 func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}, error) {
 	fmt.Printf("[DEBUG] Buscando exploits para servicio: %s, puerto: %d\n", service, port)
-	
+
 	allModules, err := c.ListExploits()
 	if err != nil {
 		return nil, err
@@ -86,7 +87,7 @@ func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}
 
 	var exploits []map[string]interface{}
 	serviceLower := strings.ToLower(service)
-	
+
 	matchCount := 0
 	for _, modulePath := range allModules {
 		if len(exploits) >= 10 {
@@ -94,22 +95,39 @@ func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}
 		}
 
 		pathLower := strings.ToLower(modulePath)
-		
-		if strings.Contains(pathLower, serviceLower) {
-			moduleInfo, ok := metadata[modulePath].(map[string]interface{})
-			if !ok {
+
+		// Reglas de match más estrictas:
+		// - Para http, solo módulos claramente HTTP/web
+		if serviceLower == "http" {
+			if !strings.Contains(pathLower, "/http/") &&
+				!strings.HasPrefix(pathLower, "exploit_multi/http") &&
+				!strings.HasPrefix(pathLower, "exploit_linux/http") &&
+				!strings.HasPrefix(pathLower, "exploit_windows/http") {
 				continue
 			}
-
-			matchCount++
-			fmt.Printf("[DEBUG] Exploit encontrado: %s\n", modulePath)
-			exploits = append(exploits, map[string]interface{}{
-				"name": modulePath,
-				"info": moduleInfo,
-			})
+		} else {
+			// Para otros servicios, exigir que el nombre tenga el servicio como token
+			if !strings.Contains(pathLower, "/"+serviceLower+"_") &&
+				!strings.Contains(pathLower, "/"+serviceLower+"/") &&
+				!strings.HasSuffix(pathLower, "_"+serviceLower) &&
+				!strings.Contains(pathLower, "_"+serviceLower+"_") {
+				continue
+			}
 		}
+
+		moduleInfo, ok := metadata[modulePath].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		matchCount++
+		fmt.Printf("[DEBUG] Exploit encontrado (filtrado): %s\n", modulePath)
+		exploits = append(exploits, map[string]interface{}{
+			"name": modulePath,
+			"info": moduleInfo,
+		})
 	}
-	
+
 	fmt.Printf("[DEBUG] Total matches para '%s': %d\n", service, matchCount)
 	return exploits, nil
 }
@@ -170,10 +188,33 @@ type ExploitSuggestion struct {
 	Service     string
 }
 
+// rankOrder asigna prioridad numérica a cada rank
+func rankOrder(rank string) int {
+	switch strings.ToLower(rank) {
+	case "excellent":
+		return 1
+	case "great":
+		return 2
+	case "good":
+		return 3
+	case "normal":
+		return 4
+	case "average":
+		return 5
+	case "low":
+		return 6
+	case "manual":
+		return 7
+	default:
+		return 8
+	}
+}
+
 // SuggestExploits sugiere exploits basados en resultados de escaneo
 func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSuggestion, error) {
 	var suggestions []ExploitSuggestion
 	searched := make(map[string]bool)
+	seenModules := make(map[string]bool)
 
 	fmt.Printf("[DEBUG] Analizando %d hosts para sugerir exploits\n", len(result.Hosts))
 
@@ -190,7 +231,6 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 				port.Service,
 				fmt.Sprintf("%s %d", port.Service, port.ID),
 			}
-
 			if port.Version != "" {
 				searchTerms = append(searchTerms, fmt.Sprintf("%s %s", port.Service, port.Version))
 			}
@@ -209,24 +249,24 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 
 				for _, exploit := range exploits {
 					name, ok := exploit["name"].(string)
-					if !ok {
+					if !ok || name == "" {
 						continue
 					}
+					// Evitar duplicados del mismo módulo
+					if seenModules[name] {
+						continue
+					}
+					seenModules[name] = true
 
 					description := "N/A"
 					rank := "unknown"
 
 					if info, ok := exploit["info"].(map[string]interface{}); ok {
-						if desc, ok := info["description"].(string); ok {
+						if desc, ok := info["description"].(string); ok && desc != "" {
 							description = desc
-						} else if descBytes, ok := info["description"].([]byte); ok {
-							description = string(descBytes)
 						}
-
-						if r, ok := info["rank"].(string); ok {
+						if r, ok := info["rank"].(string); ok && r != "" {
 							rank = r
-						} else if rBytes, ok := info["rank"].([]byte); ok {
-							rank = string(rBytes)
 						}
 					}
 
@@ -243,7 +283,23 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 		}
 	}
 
-	fmt.Printf("[DEBUG] Total sugerencias: %d\n", len(suggestions))
+	// Ordenar por rank (mejores primero) y luego por nombre
+	sort.Slice(suggestions, func(i, j int) bool {
+		ri := rankOrder(suggestions[i].Rank)
+		rj := rankOrder(suggestions[j].Rank)
+		if ri != rj {
+			return ri < rj
+		}
+		return suggestions[i].ModuleName < suggestions[j].ModuleName
+	})
+
+	// Limitar a los N mejores para no saturar la GUI
+	const maxSuggestions = 30
+	if len(suggestions) > maxSuggestions {
+		suggestions = suggestions[:maxSuggestions]
+	}
+
+	fmt.Printf("[DEBUG] Total sugerencias (tras filtros): %d\n", len(suggestions))
 	return suggestions, nil
 }
 

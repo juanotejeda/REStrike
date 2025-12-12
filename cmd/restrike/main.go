@@ -1,28 +1,28 @@
 package main
 
 import (
-	"strings"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"image/color"
 	"os"
-	"path/filepath"
-	"time"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/juanotejeda/REStrike/internal/comparison"
 	"github.com/juanotejeda/REStrike/internal/export"
-	"github.com/juanotejeda/REStrike/pkg/models"
+	"github.com/juanotejeda/REStrike/internal/msf"
 	"github.com/juanotejeda/REStrike/internal/scanner"
 	"github.com/juanotejeda/REStrike/internal/storage"
-	"github.com/juanotejeda/REStrike/internal/comparison"
-	"github.com/juanotejeda/REStrike/internal/msf"
+	"github.com/juanotejeda/REStrike/pkg/models"
 	"github.com/sirupsen/logrus"
 )
 
@@ -31,6 +31,7 @@ var (
 	commit  = "dev"
 )
 var uiLogs []string
+
 const maxUILogs = 50
 
 func appendUILog(log string) {
@@ -49,7 +50,7 @@ func main() {
 	logger := setupLogger(*verbose)
 	logger.Infof("REStrike v%s (%s) iniciando...", version, commit)
 
-		// Obtener directorio home - si estamos en sudo, usar /root
+	// Obtener directorio home - si estamos en sudo, usar /root
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {
 		homeDir, _ = os.UserHomeDir()
@@ -59,7 +60,6 @@ func main() {
 	if err != nil {
 		logger.Warnf("Error creando directorio: %v", err)
 	}
-
 
 	dbPath := filepath.Join(dataDir, "restrike.db")
 	db, err := storage.NewDatabase(dbPath, logger)
@@ -94,6 +94,7 @@ func setupLogger(verbose bool) *logrus.Logger {
 	logger.AddHook(&UILogHook{})
 	return logger
 }
+
 type UILogHook struct{}
 
 func (h *UILogHook) Levels() []logrus.Level {
@@ -165,7 +166,9 @@ func showDashboard(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sc
 
 	recentList := container.NewVBox()
 	maxScans := 5
-	if len(scans) < 5 { maxScans = len(scans) }
+	if len(scans) < 5 {
+		maxScans = len(scans)
+	}
 	for i := 0; i < maxScans; i++ {
 		s := scans[i]
 		info := fmt.Sprintf("🎯 %s | Hosts: %d | %s", s.Target, s.TotalHosts, s.Timestamp)
@@ -226,14 +229,16 @@ func showDashboard(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sc
 
 	maxLogs := 10
 	startLog := 0
-	if len(uiLogs) > maxLogs { startLog = len(uiLogs) - maxLogs }
+	if len(uiLogs) > maxLogs {
+		startLog = len(uiLogs) - maxLogs
+	}
 	logsList := container.NewVBox()
 	for _, logLine := range uiLogs[startLog:] {
 		lbl := widget.NewLabelWithStyle(logLine, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
 		logsList.Add(lbl)
 	}
 
-// Scroll con altura mínima suficiente para que se lean 8–10 líneas
+	// Scroll con altura mínima suficiente para que se lean 8–10 líneas
 	logsScroll := container.NewVScroll(logsList)
 	logsScroll.SetMinSize(fyne.NewSize(0, 200)) // Ajusta 200 para ~8 líneas, sube para más
 
@@ -251,7 +256,9 @@ func showDashboard(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sc
 				logsList.Remove(logsList.Objects[0])
 			}
 			startLog := 0
-			if len(uiLogs) > maxLogs { startLog = len(uiLogs) - maxLogs }
+			if len(uiLogs) > maxLogs {
+				startLog = len(uiLogs) - maxLogs
+			}
 			for _, logLine := range uiLogs[startLog:] {
 				lbl := widget.NewLabelWithStyle(logLine, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
 				logsList.Add(lbl)
@@ -284,7 +291,6 @@ func showDashboard(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sc
 	myWindow.Resize(fyne.NewSize(1200, 720))
 }
 
-
 func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	title := widget.NewLabel("REStrike v0.1.0")
 	title.Alignment = fyne.TextAlignCenter
@@ -292,10 +298,10 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 	subtitle := widget.NewLabel("Herramienta de Pentesting Visual para #RE Community")
 	subtitle.Alignment = fyne.TextAlignCenter
 
-		dashboardBtn := widget.NewButton("🚀 Dashboard", func() {
+	dashboardBtn := widget.NewButton("🚀 Dashboard", func() {
 		showDashboard(myWindow, logger, scan, db)
 	})
-		startBtn := widget.NewButton("Nuevo Escaneo", func() {
+	startBtn := widget.NewButton("Nuevo Escaneo", func() {
 		logger.Info("Abriendo formulario de escaneo...")
 		showScanForm(myWindow, logger, scan, db)
 	})
@@ -304,7 +310,7 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		logger.Info("Abriendo diagnóstico del sistema...")
 		showDiagnostics(myWindow, logger, scan, db)
 	})
-	
+
 	historyBtn := widget.NewButton("Ver Historial", func() {
 		logger.Info("Abriendo historial...")
 		showScanHistory(myWindow, logger, scan, db)
@@ -316,7 +322,6 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 	})
 
 	buttons := container.NewHBox(dashboardBtn, startBtn, diagBtn, historyBtn, exitBtn)
-
 
 	content := container.NewVBox(
 		title,
@@ -394,43 +399,43 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 	buttons := container.NewHBox(scanBtn, backBtn)
 
 	form := container.NewVBox(
-			widget.NewLabel("Configuración de Escaneo"),
-			widget.NewSeparator(),
-			targetLabel,
-			targetEntry,
-			widget.NewSeparator(),
+		widget.NewLabel("Configuración de Escaneo"),
+		widget.NewSeparator(),
+		targetLabel,
+		targetEntry,
+		widget.NewSeparator(),
 
-			profileLabel,
-			profileRadio,
-			commandPreview,
+		profileLabel,
+		profileRadio,
+		commandPreview,
 
-			// Línea breve debajo del comando
-			widget.NewLabel("Elige cuánto detalle quieres analizar en el objetivo:"),
+		// Línea breve debajo del comando
+		widget.NewLabel("Elige cuánto detalle quieres analizar en el objetivo:"),
 
-			// Tres “chips” horizontales con descripción muy corta
-			container.NewHBox(
-				widget.NewLabel("• Rápido: solo puertos comunes."),
-				widget.NewLabel("• Equilibrado: servicios + scripts básicos."),
-				widget.NewLabel("• Profundo: todos los puertos + vulns."),
-			),
+		// Tres “chips” horizontales con descripción muy corta
+		container.NewHBox(
+			widget.NewLabel("• Rápido: solo puertos comunes."),
+			widget.NewLabel("• Equilibrado: servicios + scripts básicos."),
+			widget.NewLabel("• Profundo: todos los puertos + vulns."),
+		),
 
-			widget.NewSeparator(),
+		widget.NewSeparator(),
 
-			widget.NewLabel("Ejemplos de target válidos:"),
-			container.NewGridWithColumns(2,
-				widget.NewLabel("IP simple"),
-				widget.NewLabel("127.0.0.1"),
-				widget.NewLabel("Red/CIDR"),
-				widget.NewLabel("192.168.1.0/24"),
-				widget.NewLabel("Rango de IPs"),
-				widget.NewLabel("192.168.1.1-10"),
-				widget.NewLabel("Hostname/FQDN"),
-				widget.NewLabel("google.com"),
-			),
+		widget.NewLabel("Ejemplos de target válidos:"),
+		container.NewGridWithColumns(2,
+			widget.NewLabel("IP simple"),
+			widget.NewLabel("127.0.0.1"),
+			widget.NewLabel("Red/CIDR"),
+			widget.NewLabel("192.168.1.0/24"),
+			widget.NewLabel("Rango de IPs"),
+			widget.NewLabel("192.168.1.1-10"),
+			widget.NewLabel("Hostname/FQDN"),
+			widget.NewLabel("google.com"),
+		),
 
-			widget.NewSeparator(),
-			buttons,
-		)
+		widget.NewSeparator(),
+		buttons,
+	)
 
 	scroll := container.NewScroll(form)
 	myWindow.SetContent(scroll)
@@ -549,6 +554,27 @@ func buildScanReport(result *models.ScanResult, duration time.Duration, filterMo
 	}
 
 	return report
+}
+
+func filterScanResultByHost(orig *models.ScanResult, ip string) *models.ScanResult {
+	if orig == nil {
+		return nil
+	}
+	var host *models.Host
+	for i := range orig.Hosts {
+		if orig.Hosts[i].IP == ip {
+			host = &orig.Hosts[i]
+			break
+		}
+	}
+	if host == nil {
+		return nil
+	}
+
+	copy := *orig
+	copy.Hosts = []models.Host{*host}
+	copy.TotalHosts = 1
+	return &copy
 }
 
 func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, target string, profile scanner.ScanProfile) {
@@ -674,6 +700,34 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	}()
 }
 
+func calcScanRiskLabel(totalHosts int, jsonData string) string {
+	if totalHosts == 0 || jsonData == "" {
+		return "SIN DATOS"
+	}
+	var r models.ScanResult
+	if err := json.Unmarshal([]byte(jsonData), &r); err != nil {
+		return "DESCONOCIDO"
+	}
+	critical := 0
+	for _, h := range r.Hosts {
+		for _, p := range h.Ports {
+			if p.State == "open" && isCriticalPort(p.ID) {
+				critical++
+			}
+		}
+	}
+	switch {
+	case critical >= 8:
+		return "ALTO"
+	case critical >= 3:
+		return "MEDIO"
+	case critical >= 1:
+		return "BAJO"
+	default:
+		return "MUY BAJO"
+	}
+}
+
 func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	scans, err := db.GetAllScans()
 	if err != nil {
@@ -681,7 +735,7 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		return
 	}
 
-	backBtn := widget.NewButton("Volver al Historial", func() {
+	backBtn := widget.NewButton("Volver al Menú", func() {
 		logger.Info("Volviendo al menú principal...")
 		showMainScreen(myWindow, logger, scan, db)
 	})
@@ -708,18 +762,26 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 
 	items := container.NewVBox()
 	for _, s := range scans {
-		scanID := s.ID
-		scanItem := widget.NewButton(fmt.Sprintf("%s - %s (%d hosts)", s.Target, s.Timestamp, s.TotalHosts), (func(id string) func() {
+		// Cargar JSON para calcular riesgo
+		data, _ := db.GetScanData(s.ID)
+		riskLabel := calcScanRiskLabel(s.TotalHosts, data)
+
+		info := widget.NewLabel(fmt.Sprintf("%s | %s | Hosts: %d | Riesgo: %s",
+			s.Target, s.Timestamp, s.TotalHosts, riskLabel))
+
+		detailBtn := widget.NewButton("Ver detalle", func(id string) func() {
 			return func() {
 				logger.Infof("Ver detalles del escaneo: %s", id)
-				showScanDetail(myWindow, logger, scan, db, scanID)
+				showScanDetailPretty(myWindow, logger, scan, db, id)
 			}
-		}(s.ID)))
-		items.Add(scanItem)
+		}(s.ID))
+
+		row := container.NewBorder(nil, nil, info, detailBtn, nil)
+		items.Add(row)
 	}
 
 	scroll := container.NewScroll(items)
-	scroll.SetMinSize(fyne.NewSize(700, 400))
+	scroll.SetMinSize(fyne.NewSize(750, 450))
 
 	buttons := container.NewHBox(filterBtn, compareBtn, backBtn)
 
@@ -738,7 +800,130 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	)
 
 	myWindow.SetContent(content)
-	myWindow.Resize(fyne.NewSize(800, 600))
+	myWindow.Resize(fyne.NewSize(900, 650))
+}
+
+func showScanDetailPretty(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scanID string) {
+	data, err := db.GetScanData(scanID)
+	if err != nil {
+		logger.Errorf("Error obteniendo escaneo: %v", err)
+		return
+	}
+
+	var result models.ScanResult
+	if err := json.Unmarshal([]byte(data), &result); err != nil {
+		logger.Errorf("Error parseando JSON del escaneo: %v", err)
+		return
+	}
+
+	statusLabel := widget.NewLabel(fmt.Sprintf("Detalle de escaneo: %s", result.Target))
+	statusLabel.Alignment = fyne.TextAlignCenter
+
+	elapsedLabel := widget.NewLabel("")
+	elapsedLabel.Alignment = fyne.TextAlignCenter
+
+	// Intentar calcular duración aproximada
+	var duration time.Duration
+	if !result.StartTime.IsZero() && !result.EndTime.IsZero() {
+		duration = result.EndTime.Sub(result.StartTime)
+		elapsedLabel.SetText(fmt.Sprintf("Duración original: %v", duration))
+	}
+
+	resultsText := widget.NewLabel("")
+	resultsText.Alignment = fyne.TextAlignLeading
+	resultsText.Wrapping = fyne.TextWrapWord
+
+	backBtn := widget.NewButton("Volver al Historial", func() {
+		showScanHistory(myWindow, logger, scan, db)
+	})
+
+	// Filtro
+	currentFilterMode := "all"
+	filterSelect := widget.NewSelect([]string{"Todos", "Críticos", "Web (HTTP/HTTPS)"}, func(value string) {
+		switch value {
+		case "Críticos":
+			currentFilterMode = "critical"
+		case "Web (HTTP/HTTPS)":
+			currentFilterMode = "web"
+		default:
+			currentFilterMode = "all"
+		}
+		report := buildScanReport(&result, duration, currentFilterMode)
+		resultsText.SetText(report)
+	})
+	filterSelect.SetSelected("Todos")
+
+	// Botones por host: sugerir exploits solo para esa IP
+	hostButtons := container.NewVBox()
+	for _, h := range result.Hosts {
+		ip := h.IP
+		btn := widget.NewButton(fmt.Sprintf("Ver posibles exploits de %s", ip), func() {
+			logger.Infof("Sugerir exploits solo para host %s", ip)
+			showExploitSuggestions(myWindow, logger, scan, db, &result, ip)
+		})
+		hostButtons.Add(btn)
+	}
+
+	// Export y exploits (todo el escaneo)
+	exportPDFBtn := widget.NewButton("Exportar PDF", func() {
+		filename := fmt.Sprintf("escaneo_%s_%s.pdf", result.Target, time.Now().Format("20060102_150405"))
+		if err := export.ExportToPDF(filename, &result); err != nil {
+			logger.Errorf("Error exportando PDF: %v", err)
+		} else {
+			logger.Infof("PDF exportado: %s", filename)
+		}
+	})
+	exportJSONBtn := widget.NewButton("Exportar JSON", func() {
+		filename := fmt.Sprintf("escaneo_%s_%s.json", result.Target, time.Now().Format("20060102_150405"))
+		if err := export.ExportToJSON(filename, &result); err != nil {
+			logger.Errorf("Error exportando JSON: %v", err)
+		} else {
+			logger.Infof("JSON exportado: %s", filename)
+		}
+	})
+	exportCSVBtn := widget.NewButton("Exportar CSV", func() {
+		filename := fmt.Sprintf("escaneo_%s_%s.csv", result.Target, time.Now().Format("20060102_150405"))
+		if err := export.ExportToCSV(filename, &result); err != nil {
+			logger.Errorf("Error exportando CSV: %v", err)
+		} else {
+			logger.Infof("CSV exportado: %s", filename)
+		}
+	})
+	exploitsBtn := widget.NewButton("Sugerir Exploits (todo el escaneo)", func() {
+		showExploitSuggestions(myWindow, logger, scan, db, &result, "")
+	})
+
+	topActions := container.NewHBox(exploitsBtn, exportPDFBtn, exportJSONBtn, exportCSVBtn)
+
+	results := container.NewVBox(
+		statusLabel,
+		widget.NewSeparator(),
+		elapsedLabel,
+		widget.NewSeparator(),
+		container.NewHBox(widget.NewLabel("Filtro de puertos:"), filterSelect),
+		hostButtons,
+		widget.NewSeparator(),
+		resultsText,
+		widget.NewSeparator(),
+		container.NewHBox(backBtn),
+	)
+
+	scroll := container.NewScroll(results)
+	myWindow.SetContent(container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel("Detalle de Escaneo (histórico)"),
+			widget.NewSeparator(),
+			topActions,
+			widget.NewSeparator(),
+		),
+		nil, nil, nil,
+		scroll,
+	))
+	myWindow.Resize(fyne.NewSize(900, 700))
+
+	// Inicializar reporte
+	report := buildScanReport(&result, duration, currentFilterMode)
+	resultsText.SetText(report)
 }
 
 func showDiagnostics(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
@@ -808,7 +993,10 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 
 	// Parse JSON para obtener ScanResult
 	var result models.ScanResult
-	json.Unmarshal([]byte(data), &result)
+	if err := json.Unmarshal([]byte(data), &result); err != nil {
+		logger.Errorf("Error parseando JSON del escaneo: %v", err)
+		return
+	}
 
 	backBtn := widget.NewButton("Volver al Historial", func() {
 		logger.Info("Volviendo al historial...")
@@ -817,8 +1005,7 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 
 	exportPDFBtn := widget.NewButton("Exportar PDF", func() {
 		filename := fmt.Sprintf("escaneo_%s_%s.pdf", result.Target, time.Now().Format("20060102_150405"))
-		err := export.ExportToPDF(filename, &result)
-		if err != nil {
+		if err := export.ExportToPDF(filename, &result); err != nil {
 			logger.Errorf("Error exportando PDF: %v", err)
 		} else {
 			logger.Infof("PDF exportado: %s", filename)
@@ -827,8 +1014,7 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 
 	exportJSONBtn := widget.NewButton("Exportar JSON", func() {
 		filename := fmt.Sprintf("escaneo_%s_%s.json", result.Target, time.Now().Format("20060102_150405"))
-		err := export.ExportToJSON(filename, &result)
-		if err != nil {
+		if err := export.ExportToJSON(filename, &result); err != nil {
 			logger.Errorf("Error exportando JSON: %v", err)
 		} else {
 			logger.Infof("JSON exportado: %s", filename)
@@ -837,8 +1023,7 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 
 	exportCSVBtn := widget.NewButton("Exportar CSV", func() {
 		filename := fmt.Sprintf("escaneo_%s_%s.csv", result.Target, time.Now().Format("20060102_150405"))
-		err := export.ExportToCSV(filename, &result)
-		if err != nil {
+		if err := export.ExportToCSV(filename, &result); err != nil {
 			logger.Errorf("Error exportando CSV: %v", err)
 		} else {
 			logger.Infof("CSV exportado: %s", filename)
@@ -847,7 +1032,7 @@ func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 
 	exploitsBtn := widget.NewButton("Sugerir Exploits", func() {
 		logger.Info("Buscando exploits sugeridos...")
-		showExploitSuggestions(myWindow, logger, scan, db, &result)
+		showExploitSuggestions(myWindow, logger, scan, db, &result, "")
 	})
 
 	exportButtons := container.NewHBox(exportPDFBtn, exportJSONBtn, exportCSVBtn)
@@ -963,7 +1148,6 @@ func showCompareSelection(myWindow fyne.Window, logger *logrus.Logger, scan *sca
 	myWindow.Resize(fyne.NewSize(800, 600))
 }
 
-
 func showComparisonResult(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scanID1, scanID2 string) {
 	// Obtener datos de ambos escaneos
 	data1, err1 := db.GetScanData(scanID1)
@@ -1030,13 +1214,13 @@ func showFilterDialog(myWindow fyne.Window, logger *logrus.Logger, scan *scanner
 		dateFrom := dateFromEntry.Text
 		dateTo := dateToEntry.Text
 		minHosts := 0
-		
+
 		if minHostsEntry.Text != "" {
 			fmt.Sscanf(minHostsEntry.Text, "%d", &minHosts)
 		}
 
 		logger.Infof("Buscando: target=%s, desde=%s, hasta=%s, minHosts=%d", target, dateFrom, dateTo, minHosts)
-		
+
 		scans, err := db.SearchScans(target, dateFrom, dateTo, minHosts)
 		if err != nil {
 			logger.Errorf("Error en búsqueda: %v", err)
@@ -1133,18 +1317,32 @@ func showFilteredResults(myWindow fyne.Window, logger *logrus.Logger, scan *scan
 	myWindow.Resize(fyne.NewSize(800, 600))
 }
 
-func showExploitSuggestions(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, result *models.ScanResult) {
+func showExploitSuggestions(
+	myWindow fyne.Window,
+	logger *logrus.Logger,
+	scan *scanner.Scanner,
+	db *storage.Database,
+	result *models.ScanResult,
+	hostIP string,
+) {
+	// Si viene un hostIP, filtramos el resultado solo a ese host
+	if hostIP != "" {
+		if filtered := filterScanResultByHost(result, hostIP); filtered != nil {
+			result = filtered
+		}
+	}
+
 	// Conectar a Metasploit
 	msfClient := msf.NewClient("127.0.0.1", 55553, "mypassword123")
-	
+
 	statusLabel := widget.NewLabel("Conectando a Metasploit...")
 	progressBar := widget.NewProgressBarInfinite()
-	
+
 	backBtn := widget.NewButton("Volver al Historial", func() {
 		logger.Info("Volviendo al detalle del escaneo...")
 		showScanHistory(myWindow, logger, scan, db)
 	})
-	
+
 	content := container.NewVBox(statusLabel, progressBar, widget.NewSeparator(), backBtn)
 	myWindow.SetContent(content)
 
@@ -1153,7 +1351,7 @@ func showExploitSuggestions(myWindow fyne.Window, logger *logrus.Logger, scan *s
 		if err := msfClient.Login(); err != nil {
 			logger.Errorf("Error conectando a Metasploit: %v", err)
 			errorMsg := fmt.Sprintf("Error: %v\n\n¿Está msfrpcd corriendo?\nEjecuta: msfrpcd -P mypassword123 -S -a 127.0.0.1 -p 55553", err)
-			
+
 			statusLabel.SetText(errorMsg)
 			progressBar.Hide()
 			myWindow.SetContent(container.NewVBox(

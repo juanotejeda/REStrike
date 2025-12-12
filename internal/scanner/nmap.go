@@ -12,6 +12,15 @@ import (
 	"github.com/juanotejeda/REStrike/pkg/models"
 )
 
+// ScanProfile define el tipo de escaneo
+type ScanProfile int
+
+const (
+	ScanProfileFast ScanProfile = iota
+	ScanProfileBalanced
+	ScanProfileDeep
+)
+
 // Scanner gestor de escaneos Nmap
 type Scanner struct {
 	logger Logger
@@ -38,12 +47,12 @@ func (s *Scanner) CheckNmapAvailability() bool {
 
 // isLocalhost verifica si el target es localhost
 func isLocalhost(target string) bool {
-	return target == "127.0.0.1" || target == "localhost" || 
+	return target == "127.0.0.1" || target == "localhost" ||
 		strings.HasPrefix(target, "127.") || target == "::1"
 }
 
-// ScanNetwork ejecuta escaneo de red
-func (s *Scanner) ScanNetwork(ctx context.Context, target string) (*models.ScanResult, error) {
+// ScanNetwork ejecuta escaneo de red con un perfil dado
+func (s *Scanner) ScanNetwork(ctx context.Context, target string, profile ScanProfile) (*models.ScanResult, error) {
 	s.logger.Infof("Iniciando escaneo de: %s", target)
 
 	// Verificar que Nmap esté disponible
@@ -58,16 +67,51 @@ func (s *Scanner) ScanNetwork(ctx context.Context, target string) (*models.ScanR
 		Hosts:     []models.Host{},
 	}
 
-	// Configurar scanner Nmap
+	// Configurar scanner Nmap según perfil
+	var portRange string
+	var withDefaultScripts bool
+	var withVulnScripts bool
+
+	switch profile {
+	case ScanProfileFast:
+		// Rápido: puertos más comunes, sin scripts pesados
+		portRange = "1-1000"
+		withDefaultScripts = false
+		withVulnScripts = false
+		s.logger.Infof("Perfil de escaneo: Rápido (aprox: nmap -T4 -F -sV -p 1-1000)")
+	case ScanProfileBalanced:
+		// Equilibrado: puertos 1-1000, scripts por defecto
+		portRange = "1-1000"
+		withDefaultScripts = true
+		withVulnScripts = false
+		s.logger.Infof("Perfil de escaneo: Equilibrado (aprox: nmap -T4 -sV -sC -p 1-1000)")
+	case ScanProfileDeep:
+		// Profundo: todos los puertos + scripts de vulnerabilidades
+		portRange = "1-65535"
+		withDefaultScripts = true
+		withVulnScripts = true
+		s.logger.Infof("Perfil de escaneo: Profundo (aprox: nmap -T4 -sV -sC --script vuln -p-)")
+	default:
+		portRange = "1-1000"
+	}
+
 	opts := []nmap.Option{
 		nmap.WithTargets(target),
-		nmap.WithPorts("1-1000"),
+		nmap.WithPorts(portRange),
 		nmap.WithServiceInfo(),
+	}
+
+	if withDefaultScripts {
+		opts = append(opts, nmap.WithDefaultScript())
+	}
+	if withVulnScripts {
+		// Scripts de vulnerabilidades
+		opts = append(opts, nmap.WithScripts("vuln"))
 	}
 
 	// Ajustar timing según el target
 	if isLocalhost(target) {
-		s.logger.Infof("Target local detectado - usando timing Insane para velocidad máxima")
+		s.logger.Infof("Target local detectado - usando timing Aggressive para velocidad")
 		opts = append(opts, nmap.WithTimingTemplate(nmap.TimingAggressive))
 	} else {
 		s.logger.Infof("Target remoto - usando timing Aggressive")

@@ -329,6 +329,40 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 
 	targetLabel := widget.NewLabel("Target a escanear (IP, rango o CIDR):")
 
+	// Perfiles de escaneo
+	profileLabel := widget.NewLabel("Perfil de escaneo:")
+
+	profiles := []string{"Rápido", "Equilibrado", "Profundo"}
+
+	// Valor por defecto
+	selectedProfile := scanner.ScanProfileBalanced
+
+	commandPreview := widget.NewLabel("")
+	updatePreview := func() {
+		switch selectedProfile {
+		case scanner.ScanProfileFast:
+			commandPreview.SetText("Se usará aproximadamente: nmap -T4 -F -sV -p 1-1000 <target>")
+		case scanner.ScanProfileBalanced:
+			commandPreview.SetText("Se usará aproximadamente: nmap -T4 -sV -sC -p 1-1000 <target>")
+		case scanner.ScanProfileDeep:
+			commandPreview.SetText("Se usará aproximadamente: nmap -T4 -sV -sC --script vuln -p- <target>")
+		}
+	}
+	updatePreview()
+
+	profileRadio := widget.NewRadioGroup(profiles, func(value string) {
+		switch value {
+		case "Rápido":
+			selectedProfile = scanner.ScanProfileFast
+		case "Equilibrado":
+			selectedProfile = scanner.ScanProfileBalanced
+		case "Profundo":
+			selectedProfile = scanner.ScanProfileDeep
+		}
+		updatePreview()
+	})
+	profileRadio.SetSelected("Equilibrado")
+
 	scanBtn := widget.NewButton("Iniciar Escaneo", func() {
 		target := targetEntry.Text
 		if target == "" {
@@ -337,7 +371,7 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 		}
 
 		logger.Infof("Iniciando escaneo de: %s", target)
-		showScanResults(myWindow, logger, scan, db, target)
+		showScanResults(myWindow, logger, scan, db, target, selectedProfile)
 	})
 
 	backBtn := widget.NewButton("Volver al Historial", func() {
@@ -348,32 +382,57 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 	targetEntry.OnSubmitted = func(s string) {
 		if s != "" {
 			logger.Infof("Iniciando escaneo de: %s", s)
-			showScanResults(myWindow, logger, scan, db, s)
+			showScanResults(myWindow, logger, scan, db, s, selectedProfile)
 		}
 	}
 
 	buttons := container.NewHBox(scanBtn, backBtn)
 
 	form := container.NewVBox(
-		widget.NewLabel("Configuración de Escaneo"),
-		widget.NewSeparator(),
-		targetLabel,
-		targetEntry,
-		widget.NewSeparator(),
-		widget.NewLabel("Formatos soportados:"),
-		widget.NewLabel("• IP simple: 127.0.0.1"),
-		widget.NewLabel("• CIDR: 192.168.1.0/24"),
-		widget.NewLabel("• Rango: 192.168.1.1-10"),
-		widget.NewLabel("• Hostname: google.com"),
-		widget.NewSeparator(),
-		buttons,
-	)
+			widget.NewLabel("Configuración de Escaneo"),
+			widget.NewSeparator(),
+			targetLabel,
+			targetEntry,
+			widget.NewSeparator(),
+
+			profileLabel,
+			profileRadio,
+			commandPreview,
+
+			// Línea breve debajo del comando
+			widget.NewLabel("Elige cuánto detalle quieres analizar en el objetivo:"),
+
+			// Tres “chips” horizontales con descripción muy corta
+			container.NewHBox(
+				widget.NewLabel("• Rápido: solo puertos comunes."),
+				widget.NewLabel("• Equilibrado: servicios + scripts básicos."),
+				widget.NewLabel("• Profundo: todos los puertos + vulns."),
+			),
+
+			widget.NewSeparator(),
+
+			widget.NewLabel("Ejemplos de target válidos:"),
+			container.NewGridWithColumns(2,
+				widget.NewLabel("IP simple"),
+				widget.NewLabel("127.0.0.1"),
+				widget.NewLabel("Red/CIDR"),
+				widget.NewLabel("192.168.1.0/24"),
+				widget.NewLabel("Rango de IPs"),
+				widget.NewLabel("192.168.1.1-10"),
+				widget.NewLabel("Hostname/FQDN"),
+				widget.NewLabel("google.com"),
+			),
+
+			widget.NewSeparator(),
+			buttons,
+		)
 
 	scroll := container.NewScroll(form)
 	myWindow.SetContent(scroll)
 }
 
-func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, target string) {
+
+func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, target string, profile scanner.ScanProfile) {
 	statusLabel := widget.NewLabel(fmt.Sprintf("Escaneando: %s", target))
 	statusLabel.Alignment = fyne.TextAlignCenter
 
@@ -431,7 +490,7 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		logger.Infof("Escaneo iniciado a las %s", startTime.Format("15:04:05"))
 
 		ctx := context.Background()
-		result, err := scan.ScanNetwork(ctx, target)
+		result, err := scan.ScanNetwork(ctx, target, profile)
 
 		ticker.Stop()
 
@@ -1102,7 +1161,7 @@ func runHeadlessScan(logger *logrus.Logger, db *storage.Database, target string)
 	logger.Infof("Ejecutando escaneo headless contra: %s", target)
 	scan := scanner.NewScanner(logger)
 	ctx := context.Background()
-	result, err := scan.ScanNetwork(ctx, target)
+	result, err := scan.ScanNetwork(ctx, target, scanner.ScanProfileFast)
 	if err != nil {
 		logger.Errorf("Error en escaneo: %v", err)
 		return

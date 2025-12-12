@@ -373,10 +373,52 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 	})
 	profileRadio.SetSelected("Equilibrado")
 
+	// Huevo de pascua: target h.a.x.o.r
+	showHaxorEasterEgg := func() {
+		msg := widget.NewLabel("¡Felicitaciones, encontraste el modo H.A.X.O.R!\n\nEscanea el QR con tu celular para visitar mi LinkedIn.")
+		msg.Wrapping = fyne.TextWrapWord
+
+		// QR muy simple en texto (placeholder visual)
+		qrLines := []string{
+			"█████████████████",
+			"█ ▓      ▓     █",
+			"█ ▓ ██ █ ▓ ██  █",
+			"█ ▓      ▓     █",
+			"█████████████████",
+			"https://www.linkedin.com/in/juanotejeda",
+		}
+		qrBox := container.NewVBox()
+		for _, l := range qrLines {
+			qrBox.Add(widget.NewLabel(l))
+		}
+
+		win := fyne.CurrentApp().NewWindow("H.A.X.O.R UNLOCKED")
+
+		closeBtn := widget.NewButton("Cerrar", func() {
+			win.Close()
+		})
+
+		win.SetContent(container.NewVBox(
+			msg,
+			widget.NewSeparator(),
+			qrBox,
+			widget.NewSeparator(),
+			closeBtn,
+		))
+		win.Resize(fyne.NewSize(420, 260))
+		win.Show()
+	}
+
+
 	scanBtn := widget.NewButton("Iniciar Escaneo", func() {
 		target := targetEntry.Text
 		if target == "" {
 			logger.Warn("Target vacío")
+			return
+		}
+
+		if target == "h.a.x.o.r" {
+			showHaxorEasterEgg()
 			return
 		}
 
@@ -390,10 +432,15 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 	})
 
 	targetEntry.OnSubmitted = func(s string) {
-		if s != "" {
-			logger.Infof("Iniciando escaneo de: %s", s)
-			showScanResults(myWindow, logger, scan, db, s, selectedProfile)
+		if s == "" {
+			return
 		}
+		if s == "h.a.x.o.r" {
+			showHaxorEasterEgg()
+			return
+		}
+		logger.Infof("Iniciando escaneo de: %s", s)
+		showScanResults(myWindow, logger, scan, db, s, selectedProfile)
 	}
 
 	buttons := container.NewHBox(scanBtn, backBtn)
@@ -409,10 +456,8 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 		profileRadio,
 		commandPreview,
 
-		// Línea breve debajo del comando
 		widget.NewLabel("Elige cuánto detalle quieres analizar en el objetivo:"),
 
-		// Tres “chips” horizontales con descripción muy corta
 		container.NewHBox(
 			widget.NewLabel("• Rápido: solo puertos comunes."),
 			widget.NewLabel("• Equilibrado: servicios + scripts básicos."),
@@ -728,6 +773,65 @@ func calcScanRiskLabel(totalHosts int, jsonData string) string {
 	}
 }
 
+// riskLevel: 0 = MUY BAJO, 1 = BAJO, 2 = MEDIO, 3 = ALTO
+func calcScanRisk(totalHosts int, jsonData string) (string, int) {
+	if totalHosts == 0 || jsonData == "" {
+		return "SIN DATOS", 0
+	}
+	var r models.ScanResult
+	if err := json.Unmarshal([]byte(jsonData), &r); err != nil {
+		return "DESCONOCIDO", 0
+	}
+	critical := 0
+	for _, h := range r.Hosts {
+		for _, p := range h.Ports {
+			if p.State == "open" && isCriticalPort(p.ID) {
+				critical++
+			}
+		}
+	}
+	switch {
+	case critical >= 8:
+		return "ALTO", 3
+	case critical >= 3:
+		return "MEDIO", 2
+	case critical >= 1:
+		return "BAJO", 1
+	default:
+		return "MUY BAJO", 0
+	}
+}
+
+func makeRiskLabel(text string, level int) *widget.Label {
+	lbl := widget.NewLabel(text)
+	switch level {
+	case 3: // ALTO
+		lbl.TextStyle = fyne.TextStyle{Bold: true}
+		lbl.Importance = widget.DangerImportance
+	case 2: // MEDIO
+		lbl.TextStyle = fyne.TextStyle{Bold: true}
+	case 1: // BAJO
+		// texto normal
+	default: // MUY BAJO / SIN DATOS
+		lbl.TextStyle = fyne.TextStyle{}
+	}
+	return lbl
+}
+
+func riskLevelFromRank(rank string) (string, int) {
+	r := strings.ToLower(rank)
+	switch {
+	case strings.Contains(r, "excellent") || strings.Contains(r, "great"):
+		return "ALTO", 3
+	case strings.Contains(r, "good") || strings.Contains(r, "normal"):
+		return "MEDIO", 2
+	case strings.Contains(r, "low"):
+		return "BAJO", 1
+	default:
+		return "DESCONOCIDO", 0
+	}
+}
+
 func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
 	scans, err := db.GetAllScans()
 	if err != nil {
@@ -764,10 +868,15 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	for _, s := range scans {
 		// Cargar JSON para calcular riesgo
 		data, _ := db.GetScanData(s.ID)
-		riskLabel := calcScanRiskLabel(s.TotalHosts, data)
+		riskText, riskLevel := calcScanRisk(s.TotalHosts, data)
 
-		info := widget.NewLabel(fmt.Sprintf("%s | %s | Hosts: %d | Riesgo: %s",
-			s.Target, s.Timestamp, s.TotalHosts, riskLabel))
+		infoText := fmt.Sprintf("%s | %s | Hosts: %d | ",
+			s.Target, s.Timestamp, s.TotalHosts)
+		info := widget.NewLabel(infoText)
+
+		riskLbl := makeRiskLabel("Riesgo: "+riskText, riskLevel)
+
+		rowLeft := container.NewHBox(info, riskLbl)
 
 		detailBtn := widget.NewButton("Ver detalle", func(id string) func() {
 			return func() {
@@ -776,7 +885,7 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 			}
 		}(s.ID))
 
-		row := container.NewBorder(nil, nil, info, detailBtn, nil)
+		row := container.NewBorder(nil, nil, rowLeft, detailBtn, nil)
 		items.Add(row)
 	}
 
@@ -1400,6 +1509,9 @@ func showExploitList(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	for _, s := range suggestions {
 		suggestion := s
 
+		riskText, riskLevel := riskLevelFromRank(suggestion.Rank)
+		riskLbl := makeRiskLabel("Riesgo: "+riskText, riskLevel)
+
 		title := fmt.Sprintf("%s", suggestion.ModuleName)
 		subtitle := fmt.Sprintf("Target: %s:%d (%s)  |  Rank: %s",
 			suggestion.Target,
@@ -1411,10 +1523,17 @@ func showExploitList(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		exploitBtn := widget.NewButton("", func() {
 			showExploitOptions(myWindow, logger, scan, db, result, suggestions, suggestion, msfClient)
 		})
-
 		exploitBtn.SetText(fmt.Sprintf("%s\n%s", title, subtitle))
 
-		items.Add(exploitBtn)
+		row := container.NewBorder(
+			container.NewHBox(riskLbl),
+			nil,
+			nil,
+			nil,
+			exploitBtn,
+		)
+
+		items.Add(row)
 		items.Add(widget.NewSeparator())
 	}
 
@@ -1453,22 +1572,24 @@ func showExploitOptions(myWindow fyne.Window, logger *logrus.Logger, scan *scann
 	lportEntry.SetText("4444")
 
 	executeBtn := widget.NewButton("⚠️ EJECUTAR EXPLOIT ⚠️", func() {
-		lhost := lhostEntry.Text
-		lport := 4444
-		fmt.Sscanf(lportEntry.Text, "%d", &lport)
+		msg := widget.NewLabel("Esta funcionalidad estará disponible en próximas versiones.\n\nPor ahora, utiliza Metasploit manualmente si deseas ejecutar este módulo.")
+		msg.Wrapping = fyne.TextWrapWord
 
-		logger.Warnf("Ejecutando exploit: %s contra %s:%d", suggestion.ModuleName, suggestion.Target, suggestion.Port)
+		win := fyne.CurrentApp().NewWindow("Próximamente")
+		closeBtn := widget.NewButton("Cerrar", func() {
+			win.Close()
+		})
 
-		go func() {
-			resultMsg, err := msf.ExecuteExploit(msfClient, suggestion, lhost, lport)
-			if err != nil {
-				logger.Errorf("Error ejecutando exploit: %v", err)
-				return
-			}
-			logger.Infof("Resultado: %s", resultMsg)
-		}()
+		win.SetContent(container.NewVBox(
+			msg,
+			widget.NewSeparator(),
+			closeBtn,
+		))
+		win.Resize(fyne.NewSize(420, 220))
+		win.Show()
 	})
 	executeBtn.Importance = widget.DangerImportance
+	executeBtn.Disable() // claramente inhabilitado por ahora
 
 	backBtn := widget.NewButton("Volver a la lista", func() {
 		logger.Info("Volviendo a lista de exploits...")
@@ -1486,7 +1607,7 @@ func showExploitOptions(myWindow fyne.Window, logger *logrus.Logger, scan *scann
 	))
 	info.Wrapping = fyne.TextWrapWord
 
-	warning := widget.NewLabel("⚠️ ADVERTENCIA: Solo ejecuta esto en sistemas que tengas permiso para atacar")
+	warning := widget.NewLabel("⚠️ ADVERTENCIA: La ejecución automática de exploits se encuentra deshabilitada en esta versión")
 	warning.Importance = widget.DangerImportance
 
 	form := container.NewVBox(

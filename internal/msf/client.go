@@ -6,11 +6,15 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"sort"
+	"strings"
 
 	"github.com/juanotejeda/REStrike/pkg/models"
 )
+
+// ---------------------
+// Tipos y helpers
+// ---------------------
 
 // Client cliente para Metasploit que lee desde archivos JSON
 type Client struct {
@@ -18,10 +22,100 @@ type Client struct {
 	ExploitCache map[string]interface{}
 }
 
+// HostContext contexto simplificado del host/servicio
+type HostContext struct {
+	OS      string
+	Service string
+	Port    int
+}
+
+func buildHostContext(host models.Host, port models.Port) HostContext {
+	return HostContext{
+		OS:      strings.ToLower(host.OS),
+		Service: strings.ToLower(port.Service),
+		Port:    port.ID,
+	}
+}
+
+// Lista negra básica de módulos muy específicos que suelen ser ruido en labs genéricos
+var moduleNameBlacklist = []string{
+	"adobe_flash",
+	"ivanti_",
+	"nagios_",
+	"accellion_",
+	"qnap_",
+}
+
+// matchPlatform decide si un módulo tiene sentido para el contexto del host
+func matchPlatform(ctx HostContext, moduleName string) bool {
+	lower := strings.ToLower(moduleName)
+
+	// Filtro por blacklist genérica
+	for _, bad := range moduleNameBlacklist {
+		if strings.Contains(lower, bad) {
+			return false
+		}
+	}
+
+	// Filtro heurístico por SO detectado
+	if ctx.OS != "" {
+		isWinHost := strings.Contains(ctx.OS, "windows")
+		isNixHost := strings.Contains(ctx.OS, "linux") || strings.Contains(ctx.OS, "unix")
+
+		isWinModule := strings.Contains(lower, "windows/")
+		isNixModule := strings.Contains(lower, "linux/") || strings.Contains(lower, "unix/")
+
+		if isWinHost && isNixModule {
+			return false
+		}
+		if isNixHost && isWinModule {
+			return false
+		}
+	}
+
+	return true
+}
+
+// ExploitSuggestion sugerencia de exploit
+type ExploitSuggestion struct {
+	ModuleName  string
+	Description string
+	Rank        string
+	Target      string
+	Port        int
+	Service     string
+}
+
+// rankOrder asigna prioridad numérica a cada rank
+func rankOrder(rank string) int {
+	switch strings.ToLower(rank) {
+	case "excellent":
+		return 1
+	case "great":
+		return 2
+	case "good":
+		return 3
+	case "normal":
+		return 4
+	case "average":
+		return 5
+	case "low":
+		return 6
+	case "manual":
+		return 7
+	default:
+		return 8
+	}
+}
+
+// ---------------------
+// Cliente Metasploit JSON
+// ---------------------
+
 // NewClient crea un nuevo cliente Metasploit
 func NewClient(host string, port int, password string) *Client {
 	msfPath := filepath.Join(os.Getenv("HOME"), ".msf4", "store", "modules_metadata.json")
-	
+
 	return &Client{
 		MetadataPath: msfPath,
 		ExploitCache: make(map[string]interface{}),
@@ -31,11 +125,11 @@ func NewClient(host string, port int, password string) *Client {
 // Login verifica que el archivo existe
 func (c *Client) Login() error {
 	fmt.Println("[*] Leyendo metadatos de Metasploit desde", c.MetadataPath)
-	
+
 	if _, err := os.Stat(c.MetadataPath); err != nil {
 		return fmt.Errorf("archivo de metadatos no encontrado: %s", c.MetadataPath)
 	}
-	
+
 	return nil
 }
 
@@ -53,11 +147,9 @@ func (c *Client) ListExploits() ([]string, error) {
 
 	var exploits []string
 
-	// Los exploits están con claves como "exploit_windows_..." o "exploit_linux_..."
-	// Los auxiliares como "auxiliary_admin_...", "auxiliary_scanner_..."
+	// Claves tipo "exploit/windows/..." o "exploit/linux/..."
 	for path := range metadata {
-		// Filtrar solo exploits (comienzan con "exploit_")
-		if strings.HasPrefix(path, "exploit_") {
+		if strings.HasPrefix(path, "exploit_") || strings.HasPrefix(path, "exploit/") {
 			exploits = append(exploits, path)
 		}
 	}
@@ -66,7 +158,7 @@ func (c *Client) ListExploits() ([]string, error) {
 	return exploits, nil
 }
 
-// GetExploits busca exploits por servicio/puerto
+// GetExploits busca exploits por servicio/puerto (filtro básico por nombre)
 func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}, error) {
 	fmt.Printf("[DEBUG] Buscando exploits para servicio: %s, puerto: %d\n", service, port)
 
@@ -98,11 +190,12 @@ func (c *Client) GetExploits(service string, port int) ([]map[string]interface{}
 
 		// Reglas de match más estrictas:
 		// - Para http, solo módulos claramente HTTP/web
-		if serviceLower == "http" {
+		if serviceLower == "http" || serviceLower == "https" {
 			if !strings.Contains(pathLower, "/http/") &&
 				!strings.HasPrefix(pathLower, "exploit_multi/http") &&
 				!strings.HasPrefix(pathLower, "exploit_linux/http") &&
-				!strings.HasPrefix(pathLower, "exploit_windows/http") {
+				!strings.HasPrefix(pathLower, "exploit_windows/http") &&
+				!strings.Contains(pathLower, "/webapp/") {
 				continue
 			}
 		} else {
@@ -178,54 +271,33 @@ func (c *Client) ExecuteModule(moduleType, moduleName string, options map[string
 	}, nil
 }
 
-// ExploitSuggestion sugerencia de exploit
-type ExploitSuggestion struct {
-	ModuleName  string
-	Description string
-	Rank        string
-	Target      string
-	Port        int
-	Service     string
-}
-
-// rankOrder asigna prioridad numérica a cada rank
-func rankOrder(rank string) int {
-	switch strings.ToLower(rank) {
-	case "excellent":
-		return 1
-	case "great":
-		return 2
-	case "good":
-		return 3
-	case "normal":
-		return 4
-	case "average":
-		return 5
-	case "low":
-		return 6
-	case "manual":
-		return 7
-	default:
-		return 8
-	}
-}
+// ---------------------
+// Sugerencias de exploits
+// ---------------------
 
 // SuggestExploits sugiere exploits basados en resultados de escaneo
 func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSuggestion, error) {
 	var suggestions []ExploitSuggestion
+
+	// Términos ya buscados para no repetir búsquedas
 	searched := make(map[string]bool)
+	// Módulos ya agregados para evitar duplicados
 	seenModules := make(map[string]bool)
+	// Contador por host:puerto:servicio
+	perPortCount := make(map[string]int)
+
+	const maxPerPort = 4      // máximo por (host,puerto,servicio)
+	const maxSuggestions = 12 // máximo total mostrado en GUI
 
 	fmt.Printf("[DEBUG] Analizando %d hosts para sugerir exploits\n", len(result.Hosts))
 
 	for _, host := range result.Hosts {
-		fmt.Printf("[DEBUG] Host: %s\n", host.IP)
 		for _, port := range host.Ports {
 			if port.State != "open" {
 				continue
 			}
 
-			fmt.Printf("[DEBUG]   Puerto %d/%s - Servicio: %s (Version: %s)\n", port.ID, port.Protocol, port.Service, port.Version)
+			ctx := buildHostContext(host, port)
 
 			searchTerms := []string{
 				port.Service,
@@ -247,21 +319,26 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 					continue
 				}
 
-				for _, exploit := range exploits {
-					name, ok := exploit["name"].(string)
+				for _, ex := range exploits {
+					name, ok := ex["name"].(string)
 					if !ok || name == "" {
 						continue
 					}
-					// Evitar duplicados del mismo módulo
 					if seenModules[name] {
 						continue
 					}
-					seenModules[name] = true
+					if !matchPlatform(ctx, name) {
+						continue
+					}
+
+					key := fmt.Sprintf("%s:%d:%s", host.IP, port.ID, strings.ToLower(port.Service))
+					if perPortCount[key] >= maxPerPort {
+						continue
+					}
 
 					description := "N/A"
 					rank := "unknown"
-
-					if info, ok := exploit["info"].(map[string]interface{}); ok {
+					if info, ok := ex["info"].(map[string]interface{}); ok {
 						if desc, ok := info["description"].(string); ok && desc != "" {
 							description = desc
 						}
@@ -278,12 +355,28 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 						Port:        port.ID,
 						Service:     port.Service,
 					})
+
+					seenModules[name] = true
+					perPortCount[key]++
+
+					if len(suggestions) >= maxSuggestions {
+						break
+					}
+				}
+				if len(suggestions) >= maxSuggestions {
+					break
 				}
 			}
+			if len(suggestions) >= maxSuggestions {
+				break
+			}
+		}
+		if len(suggestions) >= maxSuggestions {
+			break
 		}
 	}
 
-	// Ordenar por rank (mejores primero) y luego por nombre
+	// Ordenar por rank y nombre
 	sort.Slice(suggestions, func(i, j int) bool {
 		ri := rankOrder(suggestions[i].Rank)
 		rj := rankOrder(suggestions[j].Rank)
@@ -292,12 +385,6 @@ func SuggestExploits(client *Client, result *models.ScanResult) ([]ExploitSugges
 		}
 		return suggestions[i].ModuleName < suggestions[j].ModuleName
 	})
-
-	// Limitar a los N mejores para no saturar la GUI
-	const maxSuggestions = 30
-	if len(suggestions) > maxSuggestions {
-		suggestions = suggestions[:maxSuggestions]
-	}
 
 	fmt.Printf("[DEBUG] Total sugerencias (tras filtros): %d\n", len(suggestions))
 	return suggestions, nil

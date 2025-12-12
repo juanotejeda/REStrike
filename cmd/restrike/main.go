@@ -1060,7 +1060,7 @@ func showExploitList(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		)
 
 		exploitBtn := widget.NewButton("", func() {
-			showExploitOptions(myWindow, logger, scan, db, result, suggestion, msfClient)
+			showExploitOptions(myWindow, logger, scan, db, result, suggestions, suggestion, msfClient)
 		})
 
 		exploitBtn.SetText(fmt.Sprintf("%s\n%s", title, subtitle))
@@ -1094,7 +1094,7 @@ func showExploitList(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	myWindow.Resize(fyne.NewSize(800, 600))
 }
 
-func showExploitOptions(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, result *models.ScanResult, suggestion msf.ExploitSuggestion, msfClient *msf.Client) {
+func showExploitOptions(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, result *models.ScanResult, suggestions []msf.ExploitSuggestion, suggestion msf.ExploitSuggestion, msfClient *msf.Client) {
 	lhostEntry := widget.NewEntry()
 	lhostEntry.SetPlaceHolder("Tu IP (LHOST)")
 	lhostEntry.SetText("0.0.0.0")
@@ -1121,11 +1121,10 @@ func showExploitOptions(myWindow fyne.Window, logger *logrus.Logger, scan *scann
 	})
 	executeBtn.Importance = widget.DangerImportance
 
-	backBtn := widget.NewButton("Volver al Historial", func() {
+	backBtn := widget.NewButton("Volver a la lista", func() {
 		logger.Info("Volviendo a lista de exploits...")
-		showExploitSuggestions(myWindow, logger, scan, db, result)
+		showExploitList(myWindow, logger, scan, db, result, suggestions, msfClient)
 	})
-	
 
 	info := widget.NewLabel(fmt.Sprintf(
 		"Exploit: %s\n\nTarget: %s:%d\nServicio: %s\nRank: %s\n\nDescripción: %s",

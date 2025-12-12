@@ -300,6 +300,11 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		showScanForm(myWindow, logger, scan, db)
 	})
 
+	diagBtn := widget.NewButton("Diagnóstico del Sistema", func() {
+		logger.Info("Abriendo diagnóstico del sistema...")
+		showDiagnostics(myWindow, logger, scan, db)
+	})
+	
 	historyBtn := widget.NewButton("Ver Historial", func() {
 		logger.Info("Abriendo historial...")
 		showScanHistory(myWindow, logger, scan, db)
@@ -310,7 +315,7 @@ func showMainScreen(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.S
 		os.Exit(0)
 	})
 
-	buttons := container.NewHBox(dashboardBtn, startBtn, historyBtn, exitBtn)
+	buttons := container.NewHBox(dashboardBtn, startBtn, diagBtn, historyBtn, exitBtn)
 
 
 	content := container.NewVBox(
@@ -431,6 +436,120 @@ func showScanForm(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Sca
 	myWindow.SetContent(scroll)
 }
 
+func isCriticalPort(p int) bool {
+	critical := map[int]bool{
+		21: true, 22: true, 23: true, 25: true,
+		53: true, 80: true, 110: true, 139: true,
+		143: true, 389: true, 443: true, 445: true,
+		1433: true, 1521: true, 3306: true,
+		3389: true, 5900: true,
+	}
+	return critical[p]
+}
+
+// filterMode: "all", "critical", "web"
+func buildScanReport(result *models.ScanResult, duration time.Duration, filterMode string) string {
+	// Resumen agregado
+	totalOpenPorts := 0
+	webServices := 0
+
+	for _, host := range result.Hosts {
+		for _, port := range host.Ports {
+			if port.State == "open" {
+				totalOpenPorts++
+				svc := strings.ToLower(port.Service)
+				if svc == "http" || svc == "https" {
+					webServices++
+				}
+			}
+		}
+	}
+
+	report := fmt.Sprintf(
+		"\nRESUMEN DEL ESCANEO\n\n"+
+			"Target: %s\n"+
+			"Hosts vivos: %d\n"+
+			"Puertos abiertos totales: %d\n"+
+			"Servicios web (http/https): %d\n"+
+			"Duracion total: %v\n"+
+			"Inicio: %s\n"+
+			"Fin: %s\n\n"+
+			"═══════════════════════════════════\n\n",
+		result.Target,
+		result.TotalHosts,
+		totalOpenPorts,
+		webServices,
+		duration,
+		result.StartTime.Format("15:04:05"),
+		result.EndTime.Format("15:04:05"),
+	)
+
+	if len(result.Hosts) > 0 {
+		report += "HOSTS DESCUBIERTOS:\n\n"
+		for i, host := range result.Hosts {
+			report += fmt.Sprintf("%d. %s\n", i+1, host.IP)
+			if host.Hostname != "" {
+				report += fmt.Sprintf("   Hostname: %s\n", host.Hostname)
+			}
+			report += fmt.Sprintf("   Estado: %s\n", host.Status)
+			if host.OS != "" {
+				report += fmt.Sprintf("   SO: %s\n", host.OS)
+			}
+
+			if len(host.Ports) > 0 {
+				report += "   Puertos:\n"
+
+				criticalCount := 0
+				for _, port := range host.Ports {
+					if port.State != "open" {
+						continue
+					}
+
+					showPort := true
+					svcLower := strings.ToLower(port.Service)
+
+					switch filterMode {
+					case "critical":
+						showPort = isCriticalPort(port.ID)
+					case "web":
+						showPort = (svcLower == "http" || svcLower == "https")
+					}
+
+					if !showPort {
+						continue
+					}
+
+					if isCriticalPort(port.ID) {
+						criticalCount++
+					}
+
+					service := port.Service
+					if port.Version != "" {
+						service = fmt.Sprintf("%s (%s)", port.Service, port.Version)
+					}
+					report += fmt.Sprintf("     - %d/%s: %s [%s]\n",
+						port.ID,
+						port.Protocol,
+						port.State,
+						service,
+					)
+				}
+
+				// Pequeño score por host
+				if criticalCount > 0 {
+					report += fmt.Sprintf("   Riesgo estimado: ALTO (%d puertos críticos abiertos)\n", criticalCount)
+				} else {
+					report += "   Riesgo estimado: BAJO (sin puertos críticos abiertos)\n"
+				}
+			}
+			report += "\n"
+		}
+	} else {
+		report += "No se encontraron hosts activos.\n"
+	}
+
+	return report
+}
 
 func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, target string, profile scanner.ScanProfile) {
 	statusLabel := widget.NewLabel(fmt.Sprintf("Escaneando: %s", target))
@@ -441,6 +560,7 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 
 	resultsText := widget.NewLabel("Escaneando... Por favor espera.")
 	resultsText.Alignment = fyne.TextAlignLeading
+	resultsText.Wrapping = fyne.TextWrapWord
 
 	backBtn := widget.NewButton("Volver al Historial", func() {
 		logger.Info("Volviendo al menú principal...")
@@ -456,12 +576,38 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 		backBtn.Enable()
 	})
 
+	// Filtro actual del reporte
+	currentFilterMode := "all"
+
+	// Estos se rellenarán cuando termine el escaneo
+	var lastResult *models.ScanResult
+	var lastDuration time.Duration
+
+	filterSelect := widget.NewSelect([]string{"Todos", "Críticos", "Web (HTTP/HTTPS)"}, func(value string) {
+		if lastResult == nil {
+			return
+		}
+		switch value {
+		case "Críticos":
+			currentFilterMode = "critical"
+		case "Web (HTTP/HTTPS)":
+			currentFilterMode = "web"
+		default:
+			currentFilterMode = "all"
+		}
+		report := buildScanReport(lastResult, lastDuration, currentFilterMode)
+		resultsText.SetText(report)
+	})
+	filterSelect.SetSelected("Todos")
+
 	buttons := container.NewHBox(cancelBtn, backBtn)
 
 	results := container.NewVBox(
 		statusLabel,
 		widget.NewSeparator(),
 		elapsedLabel,
+		widget.NewSeparator(),
+		container.NewHBox(widget.NewLabel("Filtro de puertos:"), filterSelect),
 		widget.NewSeparator(),
 		resultsText,
 		widget.NewSeparator(),
@@ -514,63 +660,11 @@ func showScanResults(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 			logger.Infof("Escaneo guardado en BD con ID: %s", scanID)
 		}
 
-		report := fmt.Sprintf("ESCANEO COMPLETADO\n\n"+
-			"Target: %s\n"+
-			"Hosts encontrados: %d\n"+
-			"Duracion total: %v\n"+
-			"Inicio: %s\n"+
-			"Fin: %s\n\n"+
-			"═══════════════════════════════════\n\n",
-			result.Target,
-			result.TotalHosts,
-			duration,
-			result.StartTime.Format("15:04:05"),
-			result.EndTime.Format("15:04:05"),
-		)
+		// Guardar último resultado para que el selector pueda reutilizarlo
+		lastResult = result
+		lastDuration = duration
 
-				if len(result.Hosts) > 0 {
-			report += "HOSTS DESCUBIERTOS:\n\n"
-			for i, host := range result.Hosts {
-				report += fmt.Sprintf("%d. %s\n", i+1, host.IP)
-				if host.Hostname != "" {
-					report += fmt.Sprintf("   Hostname: %s\n", host.Hostname)
-				}
-				report += fmt.Sprintf("   Estado: %s\n", host.Status)
-				if host.OS != "" {
-					report += fmt.Sprintf("   SO: %s\n", host.OS)
-				}
-
-				if len(host.Ports) > 0 {
-					report += "   Puertos:\n"
-					for _, port := range host.Ports {
-						service := port.Service
-						if port.Version != "" {
-							service = fmt.Sprintf("%s (%s)", port.Service, port.Version)
-						}
-						report += fmt.Sprintf("     - %d/%s: %s [%s]",
-							port.ID,
-							port.Protocol,
-							port.State,
-							service,
-						)
-
-						// Verificar vulnerabilidades
-						vulns := scanner.GetVulnerabilitiesForPort(port.ID, port.Protocol, port.Service)
-						if len(vulns) > 0 {
-							for _, vuln := range vulns {
-								report += fmt.Sprintf("\n       ⚠️  %s\n       %s\n", scanner.RiskLevel(vuln.Risk), vuln.Description)
-							}
-						}
-						report += "\n"
-					}
-				}
-				report += "\n"
-			}
-
-
-		} else {
-			report += "No se encontraron hosts activos.\n"
-		}
+		report := buildScanReport(result, duration, currentFilterMode)
 
 		resultsText.SetText(report)
 		cancelBtn.Disable()
@@ -647,6 +741,63 @@ func showScanHistory(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.
 	myWindow.Resize(fyne.NewSize(800, 600))
 }
 
+func showDiagnostics(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database) {
+	// Nmap
+	nmapPath, nmapErr := exec.LookPath("nmap")
+	nmapStatus := "No encontrado en PATH"
+	if nmapErr == nil {
+		nmapStatus = nmapPath
+	}
+
+	// Metasploit (msfconsole)
+	msfPath, msfErr := exec.LookPath("msfconsole")
+	msfStatus := "No encontrado en PATH"
+	if msfErr == nil {
+		msfStatus = msfPath
+	}
+
+	// Metadata JSON de Metasploit
+	home := os.Getenv("HOME")
+	metaPath := filepath.Join(home, ".msf4", "store", "modules_metadata.json")
+	metaStatus := "No encontrado"
+	metaSize := "N/A"
+	metaModTime := "N/A"
+
+	if info, err := os.Stat(metaPath); err == nil {
+		metaStatus = "Existe"
+		metaSize = fmt.Sprintf("%d bytes", info.Size())
+		metaModTime = info.ModTime().Format("2006-01-02 15:04:05")
+	}
+
+	backBtn := widget.NewButton("Volver al Historial", func() {
+		showMainScreen(myWindow, logger, scan, db)
+	})
+
+	content := container.NewVBox(
+		widget.NewLabel("Diagnóstico del Sistema"),
+		widget.NewSeparator(),
+
+		widget.NewLabel("Nmap"),
+		widget.NewLabel(fmt.Sprintf("  Estado: %s", nmapStatus)),
+		widget.NewSeparator(),
+
+		widget.NewLabel("Metasploit"),
+		widget.NewLabel(fmt.Sprintf("  msfconsole: %s", msfStatus)),
+		widget.NewSeparator(),
+
+		widget.NewLabel("Metadatos de módulos (modules_metadata.json)"),
+		widget.NewLabel(fmt.Sprintf("  Ruta: %s", metaPath)),
+		widget.NewLabel(fmt.Sprintf("  Estado: %s", metaStatus)),
+		widget.NewLabel(fmt.Sprintf("  Tamaño: %s", metaSize)),
+		widget.NewLabel(fmt.Sprintf("  Última modificación: %s", metaModTime)),
+		widget.NewSeparator(),
+
+		backBtn,
+	)
+
+	scroll := container.NewScroll(content)
+	myWindow.SetContent(scroll)
+}
 
 func showScanDetail(myWindow fyne.Window, logger *logrus.Logger, scan *scanner.Scanner, db *storage.Database, scanID string) {
 	data, err := db.GetScanData(scanID)
